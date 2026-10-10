@@ -1,0 +1,49 @@
+name: Validate extensions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Validate manifests
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const paths = [
+            'extension/chrome109-win7/manifest.json',
+            'extension/chrome-modern/manifest.json',
+            'extension/firefox115-esr/manifest.json',
+            'extension/firefox-modern/manifest.json'
+          ];
+          for (const p of paths) {
+            const m = JSON.parse(fs.readFileSync(p, 'utf8'));
+            if (!m.manifest_version) throw new Error(`Missing manifest_version: ${p}`);
+            console.log(`OK ${p}`);
+          }
+          NODE
+      - name: Check JavaScript syntax
+        run: |
+          find extension -name '*.js' -print0 | while IFS= read -r -d '' file; do
+            node --check "$file"
+          done
+      - name: Package extensions
+        run: |
+          mkdir -p dist
+          for dir in extension/*; do
+            [ -d "$dir" ] || continue
+            name=$(basename "$dir")
+            (cd "$dir" && zip -qr "../../dist/${name}.zip" .)
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-extensions
+          path: dist/*.zip
