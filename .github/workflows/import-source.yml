@@ -1,0 +1,44 @@
+name: Import source archive
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Extract source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="releases/rezkery-randomizer-repository.zip"
+          if [[ ! -f "$archive" ]]; then
+            echo "Missing $archive. Upload the project ZIP to this path, then run this workflow again."
+            exit 1
+          fi
+          mkdir -p /tmp/rezkery-import
+          unzip -q "$archive" -d /tmp/rezkery-import
+          source_dir="/tmp/rezkery-import/rezkery-randomizer-repo"
+          test -d "$source_dir/extension"
+          test -d "$source_dir/android"
+          cp -a "$source_dir/extension" ./extension
+          cp -a "$source_dir/android" ./android
+          rm -f "$archive"
+      - name: Commit imported source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extension android releases
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "Import browser extension and Android source"
+          git push
