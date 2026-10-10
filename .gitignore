@@ -1,0 +1,8 @@
+.gradle/
+build/
+**/build/
+local.properties
+*.apk
+*.aab
+.DS_Store
+Thumbs.db
