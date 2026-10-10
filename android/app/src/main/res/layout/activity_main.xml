@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="18dp" android:background="#111317">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Rezkery Randomizer" android:textColor="#FFFFFF" android:textSize="22sp" android:textStyle="bold" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Маленький Android-рандомайзер" android:textColor="#8E96A3" android:layout_marginTop="4dp" />
+    <EditText android:id="@+id/domain" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="https://rezkery.com" android:textColor="#FFFFFF" android:textColorHint="#79818F" android:inputType="textUri" android:layout_marginTop="20dp" />
+    <Spinner android:id="@+id/type" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" />
+    <EditText android:id="@+id/year" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Год (необязательно)" android:textColor="#FFFFFF" android:textColorHint="#79818F" android:inputType="number" android:layout_marginTop="10dp" />
+    <Button android:id="@+id/random" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ОТКРЫТЬ СЛУЧАЙНЫЙ" android:layout_marginTop="18dp" />
+    <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#AEB5C1" android:textSize="12sp" android:layout_marginTop="14dp" />
+    <WebView android:id="@+id/web" android:layout_width="1dp" android:layout_height="1dp" android:visibility="visible" />
+</LinearLayout>

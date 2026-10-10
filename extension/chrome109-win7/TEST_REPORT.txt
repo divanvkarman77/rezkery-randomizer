@@ -1,0 +1,24 @@
+Rezkery Randomizer 1.1.0 — static verification
+
+MHTML checked:
+- year/1984 first: 36 .b-content__inline_item, 36 title links
+- year/1984/page/17: 19 cards, 19 title links
+- /page/2530/: 6 cards, 6 title links
+- year/1984/page/13 supplied best-films page: 17 cards, 17 title links
+
+Implemented:
+- custom saved domain/mirror
+- domain replacement in exported HTML card URLs and embedded data
+- background parsing and background random task
+- Chrome service_worker build
+- Firefox background-script build
+- genre URL routing: 1/2/3/82
+- year + genre routing
+- actual-card-count handling for final pages
+
+Static checks:
+- popup.js syntax: OK
+- content.js syntax: OK
+- background.js syntax: OK
+- all manifests: JSON OK
+- Android source project included; APK not built in this environment because Android SDK/Gradle toolchain is unavailable here.

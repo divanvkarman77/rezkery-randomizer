@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "version": "1.1.0",
+  "name": "Rezkery Randomizer — Chrome 109 / Windows 7",
+  "description": "Рандомайзер каталога и зеркал Rezkery с фоновой работой и базой без повторов.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Rezkery Randomizer",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  }
+}

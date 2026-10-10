@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Rezkery Randomizer</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div>
+        <div class="brand">Rezkery Randomizer</div>
+        <div class="subtitle">случайная карточка без повторов</div>
+      </div>
+      <div class="top-actions"><div class="count-pill" id="dbCount">0</div><button class="icon-btn" id="settingsButton" title="Настройки домена" aria-label="Настройки">⚙</button></div>
+    </header>
+
+    <section class="settings-panel" id="settingsPanel">
+      <div class="settings-head"><strong>Настройки</strong><button class="icon-btn" id="settingsClose" title="Закрыть">×</button></div>
+      <label>Домен / зеркало
+        <input id="domainInput" type="text" placeholder="https://rezka.fi" autocomplete="off">
+      </label>
+      <div class="hint">Укажите только домен зеркала. Например: <b>rezka.fi</b> или <b>https://rezka.fi</b>. Структура сайта должна быть совместима с Rezkery/HDrezka.</div>
+      <div class="settings-actions"><button class="primary" id="settingsSave">Сохранить</button><button class="secondary" id="settingsReset">По умолчанию</button></div>
+      <div class="muted" id="settingsStatus"></div>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="random">Рандом</button>
+      <button class="tab" data-tab="year">По году</button>
+      <button class="tab" data-tab="database">База</button>
+    </nav>
+
+    <main>
+      <section class="panel active" id="tab-random">
+        <div class="status-card">
+          <div class="status-title">Общий каталог</div>
+          <div class="status-row"><span>Страниц каталога</span><strong id="catalogPages">не определено</strong></div>
+          <button class="secondary wide" id="detectCatalog">Определить количество страниц</button>
+        </div>
+
+        <div class="filter-row">
+          <label>Тип контента<select id="catalogType">
+            <option value="all">Все вместе</option>
+            <option value="film">Только фильмы</option>
+            <option value="series">Только сериалы</option>
+            <option value="cartoon">Только мультфильмы</option>
+            <option value="anime">Только аниме</option>
+          </select></label>
+        </div>
+
+        <div class="section-title">Сколько открыть</div>
+        <div class="button-grid">
+          <button class="primary batch" data-size="1">1 карточка</button>
+          <button class="primary batch" data-size="3">3 карточки</button>
+          <button class="primary batch" data-size="5">5 карточек</button>
+          <button class="primary batch" data-size="7">7 карточек</button>
+          <button class="primary batch" data-size="10">10 карточек</button>
+          <div class="custom-row">
+            <input id="customSize" type="number" min="1" max="30" value="2">
+            <button class="primary" id="customRandom">Своё</button>
+          </div>
+        </div>
+
+        <div class="hint">Сначала случайная страница, затем случайная подходящая карточка. URL, уже попавшие в базу, больше не выбираются.</div>
+      </section>
+
+      <section class="panel" id="tab-year">
+        <div class="section-title">Случайные карточки по году</div>
+        <div class="year-row">
+          <label>Год<select id="yearSelect"></select></label>
+          <button class="secondary" id="refreshYear">↻</button>
+        </div>
+        <div class="status-card compact">
+          <div class="status-row"><span>Страниц за год</span><strong id="yearPages">не определено</strong></div>
+          <div class="muted" id="yearPageStatus">Количество определяется по пагинации выбранного года.</div>
+        </div>
+        <div class="filter-row">
+          <label>Тип контента<select id="yearType">
+            <option value="all">Все вместе</option>
+            <option value="film">Только фильмы</option>
+            <option value="series">Только сериалы</option>
+            <option value="cartoon">Только мультфильмы</option>
+            <option value="anime">Только аниме</option>
+          </select></label>
+        </div>
+        <div class="button-grid">
+          <button class="primary yearBatch" data-size="1">1 карточка</button>
+          <button class="primary yearBatch" data-size="3">3 карточки</button>
+          <button class="primary yearBatch" data-size="5">5 карточек</button>
+          <button class="primary yearBatch" data-size="7">7 карточек</button>
+          <button class="primary yearBatch" data-size="10">10 карточек</button>
+          <div class="custom-row">
+            <input id="yearCustomSize" type="number" min="1" max="30" value="2">
+            <button class="primary" id="yearCustomRandom">Своё</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="tab-database">
+        <div class="db-toolbar">
+          <input id="searchInput" type="search" placeholder="Поиск по названию…">
+          <button class="secondary" id="randomFromDb">🎲 Случайный</button>
+        </div>
+        <div class="db-filter-row">
+          <label>Случайный из базы<select id="dbTypeFilter">
+            <option value="all">Все типы</option>
+            <option value="film">Только фильмы</option>
+            <option value="series">Только сериалы</option>
+            <option value="cartoon">Только мультфильмы</option>
+            <option value="anime">Только аниме</option>
+          </select></label>
+        </div>
+        <div class="db-actions">
+          <button class="secondary" id="exportJson">Экспорт JSON</button>
+          <button class="secondary" id="exportHtml">Экспорт HTML</button>
+          <label class="file-btn secondary">Импорт<input id="importFile" type="file" accept=".json,.html,text/html,application/json"></label>
+          <button class="danger" id="clearDb">Очистить</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Название</th><th>Тип</th><th>Год</th><th>Добавлен</th><th></th></tr></thead>
+            <tbody id="dbTable"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="dbEmpty">База пока пуста.</div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span id="message">Готово.</span>
+      <button class="text-btn" id="diagnostics">Диагностика</button>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
