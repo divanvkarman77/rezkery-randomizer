@@ -1,0 +1,71 @@
+name: Publish releases
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate extension manifests and JavaScript
+        run: |
+          set -euo pipefail
+          for file in extension/*/manifest.json; do
+            node -e "const m=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')); if (!m.manifest_version || !m.version) process.exit(1)" "$file"
+          done
+          find extension -name '*.js' -print0 | while IFS= read -r -d '' file; do node --check "$file"; done
+      - name: Package browser extensions
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for dir in extension/*; do
+            [ -d "$dir" ] || continue
+            name=$(basename "$dir")
+            (cd "$dir" && zip -qr "../../dist/rezkery-randomizer-${name}.zip" .)
+          done
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build Android APK
+        working-directory: android
+        run: gradle assembleDebug
+      - name: Prepare release notes
+        run: |
+          cat > dist/RELEASE-NOTES.txt <<'EOF'
+          Rezkery Randomizer 1.1.0
+
+          Browser packages:
+          - Chrome 109 / Windows 7
+          - Modern Chrome / Chromium
+          - Firefox 115 ESR
+          - Modern Firefox
+
+          Android APK: debug build for testing, not a signed production release.
+
+          Installation notes are included in each extension ZIP. Firefox may require a signed add-on for permanent installation; temporary installation is available through about:debugging.
+          EOF
+          cp android/app/build/outputs/apk/debug/*.apk dist/rezkery-randomizer-android-debug.apk
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.1.0 >/dev/null 2>&1; then
+            echo "Release v1.1.0 already exists; refusing to overwrite it."
+            exit 1
+          fi
+          gh release create v1.1.0 dist/rezkery-randomizer-*.zip dist/rezkery-randomizer-android-debug.apk dist/RELEASE-NOTES.txt \
+            --title "Rezkery Randomizer v1.1.0" \
+            --notes "Initial packaged release of browser extensions and Android debug APK. See RELEASE-NOTES.txt for compatibility and installation notes."
