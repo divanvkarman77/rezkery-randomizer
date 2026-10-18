@@ -139,7 +139,7 @@ public class MainActivity extends Activity {
         setStatus("Определяю страницы каталога…"); web.loadUrl(pageUrl(1));
     }
     String parserScript(){
-        return "javascript:(function(){var cards=[],seen={};var ns=document.querySelectorAll('.b-content__inline_item');"+
+        return "(function(){var cards=[],seen={};var ns=document.querySelectorAll('.b-content__inline_item');"+
         "for(var i=0;i<ns.length;i++){var n=ns[i],a=n.querySelector('a[href]');if(!a)continue;var u=a.href;if(seen[u])continue;seen[u]=1;var l=n.querySelector('.b-content__inline_item-link');cards.push({url:u,title:(l?l.innerText:a.innerText||'Без названия').trim()});}"+
         "var max=1,as=document.querySelectorAll('a[href]');for(var j=0;j<as.length;j++){var h=as[j].href,m=h.match(/\\/page\\/(\\d+)\\/?(?:\\?.*)?$/);if(m)max=Math.max(max,parseInt(m[1],10)||1);}return JSON.stringify({cards:cards,max:max});})()";
     }
@@ -206,7 +206,7 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("Моя база").setMessage(text.toString())
             .setPositiveButton("Случайный из базы",(d,w)->openRandomSaved())
             .setNeutralButton("Очистить базу",(d,w)->new AlertDialog.Builder(this).setMessage("Удалить всю базу и историю без повторов?")
-                .setNegativeButton("Отмена",null).setPositiveButton("Удалить",(a,b)->{library=new JSONArray();saveLibrary();setStatus("База очищена.");}).show())
+                .setNegativeButton("Отмена",null).setPositiveButton("Удалить",(a,b)->{library=new JSONArray();prefs.edit().putString("used","[]").apply();saveLibrary();setStatus("База и история очищены.");}).show())
             .setNegativeButton("Закрыть",null).show();
     }
     void openRandomSaved(){
