@@ -18,7 +18,7 @@ import java.util.*;
 
 public class MainActivity extends Activity {
     EditText domain, year;
-    Spinner type;
+    Spinner type, openMode;
     TextView status, subtitle;
     WebView web;
     Button random, themeButton, databaseButton, exportJsonButton, importJsonButton,
@@ -26,6 +26,7 @@ public class MainActivity extends Activity {
     android.content.SharedPreferences prefs;
     String[] types={"Все вместе","Только фильмы","Только сериалы","Только мультфильмы","Только аниме"};
     String[] genres={"","1","2","3","82"};
+    String[] openModes={"Открывать в браузере","Открывать в HDRezka App","Спрашивать каждый раз"};
     int pendingPage=-1;
     static final int PICK_IMPORT=101, PICK_EXPORT_JSON=102, PICK_EXPORT_HTML=103;
     JSONArray library = new JSONArray();
@@ -35,7 +36,7 @@ public class MainActivity extends Activity {
         super.onCreate(b); setContentView(R.layout.activity_main);
         prefs=getSharedPreferences("rzk",0);
         domain=findViewById(R.id.domain); year=findViewById(R.id.year); type=findViewById(R.id.type);
-        status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); web=findViewById(R.id.web);
+        status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); web=findViewById(R.id.web); openMode=findViewById(R.id.openMode);
         random=findViewById(R.id.random); themeButton=findViewById(R.id.theme);
         databaseButton=findViewById(R.id.database); exportJsonButton=findViewById(R.id.exportJson);
         importJsonButton=findViewById(R.id.importJson); exportHtmlButton=findViewById(R.id.exportHtml);
@@ -46,6 +47,12 @@ public class MainActivity extends Activity {
         type.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,types) {{
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         }});
+        openMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {{ setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }});
+        openMode.setSelection(prefs.getInt("openMode",0));
+        openMode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("openMode",pos).apply();}
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+        });
         loadLibrary(); applyTheme();
         web.getSettings().setJavaScriptEnabled(true); web.getSettings().setDomStorageEnabled(true);
         web.setWebViewClient(new WebViewClient(){
@@ -65,7 +72,7 @@ public class MainActivity extends Activity {
     }
 
     void applyTheme(){
-        int selectedType=type.getSelectedItemPosition();
+        int selectedType=type.getSelectedItemPosition();\n        int selectedOpenMode=openMode.getSelectedItemPosition();
         int bg=lightTheme?Color.rgb(247,249,252):Color.rgb(17,19,23);
         int fg=lightTheme?Color.rgb(24,29,38):Color.WHITE;
         int muted=lightTheme?Color.rgb(76,86,102):Color.rgb(174,181,193);
@@ -76,7 +83,7 @@ public class MainActivity extends Activity {
         domain.setHintTextColor(muted); year.setHintTextColor(muted);
         int[][] states=new int[][]{new int[]{android.R.attr.state_enabled},new int[]{}};
         int[] colors=new int[]{fg,fg};
-        type.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
+        type.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));\n        openMode.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));\n        openMode.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
         type.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
         for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton}){
             b.setTextColor(lightTheme?Color.WHITE:Color.rgb(20,22,26));
@@ -95,7 +102,7 @@ public class MainActivity extends Activity {
                 TextView tv=(TextView)super.getDropDownView(position,convert,parent); tv.setTextColor(fg); tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50)); tv.setPadding(18,18,18,18); return tv;
             }
         });
-        type.setSelection(Math.max(0, Math.min(selectedType, types.length-1)));
+        type.setSelection(Math.max(0, Math.min(selectedType, types.length-1)));\n        openMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {\n            { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }\n            @Override public android.view.View getView(int position, android.view.View convert, android.view.ViewGroup parent) { TextView tv=(TextView)super.getView(position,convert,parent); tv.setTextColor(fg); tv.setPadding(12,8,12,8); return tv; }\n            @Override public android.view.View getDropDownView(int position, android.view.View convert, android.view.ViewGroup parent) { TextView tv=(TextView)super.getDropDownView(position,convert,parent); tv.setTextColor(fg); tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50)); tv.setPadding(18,18,18,18); return tv; }\n        });\n        openMode.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));
     }
     static class ViewFlags { static final int LIGHT_STATUS=0x00002000; }
 
@@ -145,7 +152,30 @@ public class MainActivity extends Activity {
             setStatus("Открыто и добавлено в базу: "+pick.optString("title","Без названия")+" · записей: "+library.length());
         }catch(Exception e){setStatus("Ошибка: "+e.getMessage());}
     }
-    HashSet<String> usedUrls(){
+
+    String hdrezkaUrl(String original){
+        try{
+            Uri u=Uri.parse(original);
+            if(u.getHost()==null)return original;
+            return u.buildUpon().authority("hdrzk.org").build().toString();
+        }catch(Exception e){return original;}
+    }
+    void openFilm(String original){
+        int mode=prefs.getInt("openMode",0);
+        String target=mode==1?hdrezkaUrl(original):original;
+        Intent view=new Intent(Intent.ACTION_VIEW,Uri.parse(target));
+        view.addCategory(Intent.CATEGORY_BROWSABLE);
+        try{
+            if(mode==2) startActivity(Intent.createChooser(view,"Где открыть фильм?"));
+            else startActivity(view);
+        }catch(Exception e){
+            if(mode==1){
+                try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(original)));setStatus("HDRezka App не перехватила ссылку; открыл исходную ссылку.");}
+                catch(Exception ex){setStatus("Не удалось открыть ссылку: "+ex.getMessage());}
+            }else setStatus("Не найдено приложение для открытия ссылки: "+e.getMessage());
+        }
+    }
+\n    HashSet<String> usedUrls(){
         HashSet<String> out=new HashSet<>();
         try{for(int i=0;i<library.length();i++)out.add(library.getJSONObject(i).optString("url",""));}catch(Exception ignored){}
         String saved=prefs.getString("used","");
@@ -167,7 +197,7 @@ public class MainActivity extends Activity {
     void openRandomSaved(){
         if(library.length()==0){setStatus("База пуста.");return;}
         JSONObject x=library.optJSONObject(new Random().nextInt(library.length()));
-        if(x!=null){String u=x.optString("url","");if(!u.isEmpty())startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(u)));}
+        if(x!=null){String u=x.optString("url","");if(!u.isEmpty())openFilm(u);}
     }
     JSONObject exportObject(){JSONObject o=new JSONObject();try{o.put("format","rezkery-randomizer-db");o.put("version",1);o.put("items",library);o.put("used",new JSONArray(usedUrls()));}catch(Exception ignored){}return o;}
     String htmlExport(){
