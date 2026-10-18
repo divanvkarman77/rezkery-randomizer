@@ -189,7 +189,8 @@ public class MainActivity extends Activity {
             }else setStatus("Не найдено приложение для открытия ссылки: "+e.getMessage());
         }
     }
-\n    HashSet<String> usedUrls(){
+
+    HashSet<String> usedUrls(){
         HashSet<String> out=new HashSet<>();
         try{for(int i=0;i<library.length();i++)out.add(library.getJSONObject(i).optString("url",""));}catch(Exception ignored){}
         String saved=prefs.getString("used","");
