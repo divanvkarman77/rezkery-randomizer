@@ -26,7 +26,6 @@ public class MainActivity extends Activity {
     android.content.SharedPreferences prefs;
     String[] types={"Все вместе","Только фильмы","Только сериалы","Только мультфильмы","Только аниме"};
     String[] genres={"","1","2","3","82"};
-    String[] openModes={"В браузере","В HDRezka App (домен hdrzk.org)","Спрашивать каждый раз"};
     String[] openModes={"Открывать в браузере","Открывать в HDRezka App","Спрашивать каждый раз"};
     int pendingPage=-1;
     static final int PICK_IMPORT=101, PICK_EXPORT_JSON=102, PICK_EXPORT_HTML=103;
@@ -38,7 +37,7 @@ public class MainActivity extends Activity {
         prefs=getSharedPreferences("rzk",0);
         domain=findViewById(R.id.domain); year=findViewById(R.id.year); type=findViewById(R.id.type);
         status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); web=findViewById(R.id.web);
-        openModeSpinner=findViewById(R.id.openMode); openMode=findViewById(R.id.openMode);
+        openMode=findViewById(R.id.openMode);
         random=findViewById(R.id.random); themeButton=findViewById(R.id.theme);
         databaseButton=findViewById(R.id.database); exportJsonButton=findViewById(R.id.exportJson);
         importJsonButton=findViewById(R.id.importJson); exportHtmlButton=findViewById(R.id.exportHtml);
