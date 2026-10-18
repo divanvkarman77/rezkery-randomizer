@@ -65,6 +65,7 @@ public class MainActivity extends Activity {
     }
 
     void applyTheme(){
+        int selectedType=type.getSelectedItemPosition();
         int bg=lightTheme?Color.rgb(247,249,252):Color.rgb(17,19,23);
         int fg=lightTheme?Color.rgb(24,29,38):Color.WHITE;
         int muted=lightTheme?Color.rgb(76,86,102):Color.rgb(174,181,193);
@@ -94,8 +95,9 @@ public class MainActivity extends Activity {
                 TextView tv=(TextView)super.getDropDownView(position,convert,parent); tv.setTextColor(fg); tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50)); tv.setPadding(18,18,18,18); return tv;
             }
         });
+        type.setSelection(Math.max(0, Math.min(selectedType, types.length-1)));
     }
-    static class ViewFlags { static final int LIGHT_STATUS=0x00002000|0x00000010; }
+    static class ViewFlags { static final int LIGHT_STATUS=0x00002000; }
 
     String origin(){
         String d=domain.getText().toString().trim();
