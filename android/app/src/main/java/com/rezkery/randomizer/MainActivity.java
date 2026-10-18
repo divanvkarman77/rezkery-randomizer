@@ -54,14 +54,6 @@ public class MainActivity extends Activity {
             public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("openMode",pos).apply();}
             public void onNothingSelected(android.widget.AdapterView<?> p){}
         });
-        openModeSpinner.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {{
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        }});
-        openModeSpinner.setSelection(Math.max(0,Math.min(prefs.getInt("openMode",0),openModes.length-1)));
-        openModeSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-            public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("openMode",pos).apply();}
-            public void onNothingSelected(android.widget.AdapterView<?> p){}
-        });
         loadLibrary(); applyTheme();
         web.getSettings().setJavaScriptEnabled(true); web.getSettings().setDomStorageEnabled(true);
         web.setWebViewClient(new WebViewClient(){
@@ -82,7 +74,7 @@ public class MainActivity extends Activity {
 
     void applyTheme(){
         int selectedType=type.getSelectedItemPosition();
-        int selectedOpenMode=openModeSpinner.getSelectedItemPosition();\n        int selectedOpenMode=openMode.getSelectedItemPosition();
+        int selectedOpenMode=openMode.getSelectedItemPosition();
         int bg=lightTheme?Color.rgb(247,249,252):Color.rgb(17,19,23);
         int fg=lightTheme?Color.rgb(24,29,38):Color.WHITE;
         int muted=lightTheme?Color.rgb(76,86,102):Color.rgb(174,181,193);
@@ -94,8 +86,8 @@ public class MainActivity extends Activity {
         int[][] states=new int[][]{new int[]{android.R.attr.state_enabled},new int[]{}};
         int[] colors=new int[]{fg,fg};
         type.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
-        openModeSpinner.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
-        openModeSpinner.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));\n        openMode.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));\n        openMode.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
+        openMode.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
+        openMode.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
         type.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
         for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton}){
             b.setTextColor(lightTheme?Color.WHITE:Color.rgb(20,22,26));
@@ -115,7 +107,7 @@ public class MainActivity extends Activity {
             }
         });
         type.setSelection(Math.max(0, Math.min(selectedType, types.length-1)));
-        openModeSpinner.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {
+        openMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {
             { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }
             @Override public android.view.View getView(int position, android.view.View convert, android.view.ViewGroup parent) {
                 TextView tv=(TextView)super.getView(position,convert,parent); tv.setTextColor(fg); tv.setPadding(12,8,12,8); return tv;
@@ -124,7 +116,7 @@ public class MainActivity extends Activity {
                 TextView tv=(TextView)super.getDropDownView(position,convert,parent); tv.setTextColor(fg); tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50)); tv.setPadding(18,18,18,18); return tv;
             }
         });
-        openModeSpinner.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));\n        openMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {\n            { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }\n            @Override public android.view.View getView(int position, android.view.View convert, android.view.ViewGroup parent) { TextView tv=(TextView)super.getView(position,convert,parent); tv.setTextColor(fg); tv.setPadding(12,8,12,8); return tv; }\n            @Override public android.view.View getDropDownView(int position, android.view.View convert, android.view.ViewGroup parent) { TextView tv=(TextView)super.getDropDownView(position,convert,parent); tv.setTextColor(fg); tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50)); tv.setPadding(18,18,18,18); return tv; }\n        });\n        openMode.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));
+        openMode.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {\n            { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }\n            @Override public android.view.View getView(int position, android.view.View convert, android.view.ViewGroup parent) { TextView tv=(TextView)super.getView(position,convert,parent); tv.setTextColor(fg); tv.setPadding(12,8,12,8); return tv; }\n            @Override public android.view.View getDropDownView(int position, android.view.View convert, android.view.ViewGroup parent) { TextView tv=(TextView)super.getDropDownView(position,convert,parent); tv.setTextColor(fg); tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50)); tv.setPadding(18,18,18,18); return tv; }\n        });\n        openMode.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));
     }
     static class ViewFlags { static final int LIGHT_STATUS=0x00002000; }
 
