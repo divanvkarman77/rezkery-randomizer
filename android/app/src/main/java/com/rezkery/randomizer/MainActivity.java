@@ -116,7 +116,7 @@ public class MainActivity extends Activity {
                 TextView tv=(TextView)super.getDropDownView(position,convert,parent); tv.setTextColor(fg); tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50)); tv.setPadding(18,18,18,18); return tv;
             }
         });
-        openMode.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {\n            { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }\n            @Override public android.view.View getView(int position, android.view.View convert, android.view.ViewGroup parent) { TextView tv=(TextView)super.getView(position,convert,parent); tv.setTextColor(fg); tv.setPadding(12,8,12,8); return tv; }\n            @Override public android.view.View getDropDownView(int position, android.view.View convert, android.view.ViewGroup parent) { TextView tv=(TextView)super.getDropDownView(position,convert,parent); tv.setTextColor(fg); tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50)); tv.setPadding(18,18,18,18); return tv; }\n        });\n        openMode.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));
+        openMode.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));
     }
     static class ViewFlags { static final int LIGHT_STATUS=0x00002000; }
 
