@@ -363,17 +363,37 @@ public class MainActivity extends Activity {
                 try(OutputStream out=getContentResolver().openOutputStream(uri)){out.write(content.getBytes(StandardCharsets.UTF_8));}
                 setStatus("Экспорт завершён: "+uri.getLastPathSegment());
             }else if(requestCode==PICK_IMPORT){
-                String content=readUri(uri);JSONArray incoming;
-                if(content.toLowerCase(Locale.ROOT).contains("<html")||content.contains("id='rezkery-db'")||content.contains("id=\"rezkery-db\"")){
-                    int a=content.indexOf("id='rezkery-db'");if(a<0)a=content.indexOf("id=\"rezkery-db\"");
-                    int gt=content.indexOf('>',a),end=content.indexOf("</script>",gt);
-                    if(a<0||gt<0||end<0)throw new Exception("В HTML не найдена встроенная база. Импортируй JSON, созданный приложением.");
-                    JSONObject o=new JSONObject(content.substring(gt+1,end));incoming=o.optJSONArray("items");
-                }else{JSONObject o=new JSONObject(content);incoming=o.optJSONArray("items");}
-                if(incoming==null)throw new Exception("Файл не содержит списка items.");
-                mergeLibrary(incoming);setStatus("Импорт завершён. Всего записей: "+library.length());
+                String content=readUri(uri);String trimmed=content.trim();JSONArray incoming;JSONArray importedUsed=null;
+                if(trimmed.toLowerCase(Locale.ROOT).contains("<html")){
+                    String embedded=extractEmbeddedJson(content);
+                    if(embedded==null)throw new Exception("В HTML не найдена встроенная база Rezkery Randomizer.");
+                    Object parsed=new JSONTokener(embedded).nextValue();
+                    if(parsed instanceof JSONArray)incoming=(JSONArray)parsed;
+                    else if(parsed instanceof JSONObject){JSONObject o=(JSONObject)parsed;incoming=firstArray(o,"items","movies","data");importedUsed=o.optJSONArray("used");}
+                    else throw new Exception("В HTML найдены данные неизвестного формата.");
+                }else{
+                    Object parsed=new JSONTokener(trimmed).nextValue();
+                    if(parsed instanceof JSONArray)incoming=(JSONArray)parsed;
+                    else if(parsed instanceof JSONObject){JSONObject o=(JSONObject)parsed;incoming=firstArray(o,"items","movies","data");importedUsed=o.optJSONArray("used");}
+                    else throw new Exception("Файл должен содержать JSON-массив карточек.");
+                }
+                if(incoming==null)throw new Exception("Файл не содержит списка items или movies.");
+                mergeLibrary(incoming);
+                if(importedUsed!=null){HashSet<String> used=usedUrls();for(int i=0;i<importedUsed.length();i++){String u=importedUsed.optString(i,"");if(!u.isEmpty())used.add(u);}prefs.edit().putString("used",new JSONArray(used).toString()).apply();}
+                setStatus("Импорт завершён. Всего записей: "+library.length());
             }
         }catch(Exception e){setStatus("Не удалось обработать файл: "+e.getMessage());}
+    }
+    JSONArray firstArray(JSONObject object,String... keys){
+        for(String key:keys){JSONArray value=object.optJSONArray(key);if(value!=null)return value;}return null;
+    }
+    String extractEmbeddedJson(String html){
+        String[] ids={"rezkery-db","rezkery-data"};
+        for(String id:ids){
+            java.util.regex.Matcher m=java.util.regex.Pattern.compile("<script[^>]*id=[\\\"']"+id+"[\\\"'][^>]*>([\\s\\S]*?)</script>",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(html);
+            if(m.find())return m.group(1).trim();
+        }
+        return null;
     }
     String readUri(Uri uri)throws Exception{StringBuilder b=new StringBuilder();try(InputStream in=getContentResolver().openInputStream(uri);BufferedReader r=new BufferedReader(new InputStreamReader(in,StandardCharsets.UTF_8))){String line;while((line=r.readLine())!=null)b.append(line).append('\n');}return b.toString();}
     void mergeLibrary(JSONArray incoming)throws Exception{
