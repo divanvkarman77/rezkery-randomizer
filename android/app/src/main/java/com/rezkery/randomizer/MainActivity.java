@@ -147,6 +147,16 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(bg); getWindow().setNavigationBarColor(bg);
         getWindow().getDecorView().setSystemUiVisibility(lightTheme?ViewFlags.LIGHT_STATUS:0);
         // Force readable dropdown text; the adapter is recreated when theme changes.
+        ArrayList<String> yearOptions=new ArrayList<>();for(int y=java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);y>=1900;y--)yearOptions.add(String.valueOf(y));
+        yearDropdown.setDropDownBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
+        yearDropdown.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_dropdown_item_1line,yearOptions){
+            @Override public android.view.View getView(int position,android.view.View convert,android.view.ViewGroup parent){
+                TextView tv=(TextView)super.getView(position,convert,parent);tv.setTextColor(fg);tv.setPadding(18,12,18,12);tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50));return tv;
+            }
+            @Override public android.view.View getDropDownView(int position,android.view.View convert,android.view.ViewGroup parent){
+                TextView tv=(TextView)super.getDropDownView(position,convert,parent);tv.setTextColor(fg);tv.setPadding(18,14,18,14);tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50));return tv;
+            }
+        });
         type.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,types) {
             { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }
             @Override public android.view.View getView(int position, android.view.View convert, android.view.ViewGroup parent) {
@@ -541,12 +551,24 @@ public class MainActivity extends Activity {
         WebView loginWeb=new WebView(this);
         loginWeb.getSettings().setJavaScriptEnabled(true);loginWeb.getSettings().setDomStorageEnabled(true);
         loginWeb.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);
+        loginWeb.getSettings().setSupportMultipleWindows(false);
+        String browserAgent=loginWeb.getSettings().getUserAgentString();
+        loginWeb.getSettings().setUserAgentString(browserAgent.replace("; wv",""));
         CookieManager cookieManager=CookieManager.getInstance();cookieManager.setAcceptCookie(true);
         if(android.os.Build.VERSION.SDK_INT>=21)cookieManager.setAcceptThirdPartyCookies(loginWeb,true);
         loginWeb.setWebChromeClient(new WebChromeClient());
         loginWeb.setWebViewClient(new WebViewClient(){
             @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){pageStatus.setText("Загрузка страницы…");}
-            @Override public void onPageFinished(WebView view,String url){pageStatus.setText("Если страница показывает ваш аккаунт, нажми «Синхронизировать».");cookieManager.flush();}
+            @Override public void onPageFinished(WebView view,String url){
+                cookieManager.flush();
+                view.evaluateJavascript("(document.title+' '+(document.body?document.body.innerText:'' )).slice(0,2500)",value->{
+                    String pageText="";
+                    try{Object decoded=new JSONTokener(value==null?"":value).nextValue();pageText=String.valueOf(decoded).toLowerCase(Locale.ROOT);}catch(Exception ignored){}
+                    if(pageText.matches("(?s).*(anubis|cloudflare|captcha|провер(ка|ьте).*человек|подтвердите.*человек).*"))
+                        pageStatus.setText("HDRezka просит пройти проверку на бота. Заверши её на странице и дождись загрузки сайта.");
+                    else pageStatus.setText("Войди в аккаунт. После успешного входа нажми «Синхронизировать».");
+                });
+            }
         });
         int webHeight=(int)(520*getResources().getDisplayMetrics().density);
         box.addView(loginWeb,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,webHeight));
