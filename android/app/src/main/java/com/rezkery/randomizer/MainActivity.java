@@ -368,8 +368,8 @@ public class MainActivity extends Activity {
         spinner.setSelection(Math.max(0,Math.min(selected,values.length-1)));
     }
     void openSettingsWindow(){
-        if(settingsPanel.getParent() instanceof android.view.ViewGroup)return;
         LinearLayout root=findViewById(R.id.root);
+        if(settingsPanel.getParent()!=root)return;
         android.view.ViewGroup parent=(android.view.ViewGroup)settingsPanel.getParent();
         int childIndex=parent.indexOfChild(settingsPanel);
         android.view.ViewGroup.LayoutParams layoutParams=settingsPanel.getLayoutParams();
