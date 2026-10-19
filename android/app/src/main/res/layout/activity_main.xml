@@ -5,8 +5,15 @@
     <LinearLayout android:id="@+id/root" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:orientation="vertical" android:padding="18dp"
         android:background="#111317">
-        <TextView android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="Rezkery Randomizer" android:textColor="#181D26" android:textSize="25sp" android:textStyle="bold" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:id="@+id/title" android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="Rezkery Randomizer" android:textColor="#181D26"
+                android:textSize="25sp" android:textStyle="bold" />
+            <Button android:id="@+id/theme" android:layout_width="48dp" android:layout_height="48dp"
+                android:layout_marginStart="8dp" android:contentDescription="Переключить тему"
+                android:text="☀" android:textSize="22sp" />
+        </LinearLayout>
         <TextView android:id="@+id/subtitle" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="Случайный выбор · база без повторов" android:textColor="#AEB5C1" android:textSize="15sp" android:layout_marginTop="5dp" />
         <Button android:id="@+id/simpleMode" android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -14,7 +21,44 @@
         <Button android:id="@+id/advancedMode" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="Расширенный режим" android:layout_marginTop="4dp" />
         <Button android:id="@+id/settings" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="⚙ Настройки" android:layout_marginTop="10dp" />
+            android:text="⚙ Настройки" android:layout_marginTop="6dp" />
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Открывать карточки" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
+        <Spinner android:id="@+id/openMode" android:layout_width="match_parent" android:layout_height="54dp"
+            android:spinnerMode="dropdown" android:paddingStart="10dp" android:paddingEnd="10dp" />
+
+        <LinearLayout android:id="@+id/advancedPanel" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:visibility="gone">
+            <TextView android:id="@+id/categoryLabel" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Категория" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="10dp" />
+            <Spinner android:id="@+id/type" android:layout_width="match_parent" android:layout_height="54dp"
+                android:spinnerMode="dropdown" android:paddingStart="10dp" android:paddingEnd="10dp" />
+            <TextView android:id="@+id/yearLabel" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Год (необязательно)" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="8dp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical">
+                <AutoCompleteTextView android:id="@+id/year" android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:hint="Любой год или выбери год" android:textColor="#FFFFFF"
+                    android:textColorHint="#AEB5C1" android:inputType="number" android:maxLength="4"
+                    android:singleLine="true" android:layout_marginTop="8dp" />
+                <Button android:id="@+id/yearDropdownButton" android:layout_width="44dp" android:layout_height="wrap_content"
+                    android:text="▼" android:contentDescription="Показать список годов" />
+                <Button android:id="@+id/yearMinus" android:layout_width="48dp" android:layout_height="wrap_content"
+                    android:text="−" android:contentDescription="Уменьшить год" />
+                <Button android:id="@+id/yearPlus" android:layout_width="48dp" android:layout_height="wrap_content"
+                    android:text="+" android:contentDescription="Увеличить год" />
+            </LinearLayout>
+            <TextView android:id="@+id/countLabel" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Количество карточек (1–30)" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="8dp" />
+            <EditText android:id="@+id/count" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:hint="1" android:inputType="number" android:maxLength="2" android:singleLine="true" android:text="1" />
+        </LinearLayout>
+        <Button android:id="@+id/random" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="🎲 ВЫБРАТЬ СЛУЧАЙНУЮ КАРТОЧКУ" android:textStyle="bold" android:layout_marginTop="14dp" />
+        <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Готово" android:textColor="#AEB5C1" android:textSize="14sp" android:layout_marginTop="12dp" android:padding="8dp" />
+
         <LinearLayout android:id="@+id/settingsPanel" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="vertical" android:visibility="gone">
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -25,68 +69,43 @@
                 android:text="ПАУЗА ПОСЛЕ АНТИБОТ-ПРОВЕРКИ" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="8dp" />
             <Spinner android:id="@+id/protectionCooldown" android:layout_width="match_parent" android:layout_height="54dp"
                 android:spinnerMode="dropdown" android:paddingStart="10dp" android:paddingEnd="10dp" />
-        <Button android:id="@+id/theme" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="☀ Светлая тема" android:layout_marginTop="12dp" />
-        <TextView android:id="@+id/domainLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Домен каталога" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="8dp" />
-        <EditText android:id="@+id/domain" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="https://rezkery.com" android:textColor="#FFFFFF" android:textColorHint="#AEB5C1"
-            android:inputType="textUri" android:singleLine="true" android:layout_marginTop="12dp" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="Открывать фильмы" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
-        <Spinner android:id="@+id/openMode" android:layout_width="match_parent" android:layout_height="54dp"
-            android:spinnerMode="dropdown" android:paddingStart="10dp" android:paddingEnd="10dp"
-            android:backgroundTint="#C8CDD5" android:background="#343943" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:id="@+id/categoryLabel" android:text="Категория" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="10dp" />
-        <Spinner android:id="@+id/type" android:layout_width="match_parent" android:layout_height="54dp"
-            android:spinnerMode="dropdown" android:paddingStart="10dp" android:paddingEnd="10dp"
-            android:backgroundTint="#C8CDD5" android:background="#343943" />
-        <TextView android:id="@+id/yearLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Год (необязательно)" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="8dp" />
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
-            <AutoCompleteTextView android:id="@+id/year" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                android:hint="Любой год или выбери год" android:textColor="#FFFFFF" android:textColorHint="#AEB5C1"
-                android:inputType="number" android:maxLength="4" android:singleLine="true" android:layout_marginTop="8dp" />
-            <Button android:id="@+id/yearMinus" android:layout_width="48dp" android:layout_height="wrap_content" android:text="−" android:contentDescription="Уменьшить год" />
-            <Button android:id="@+id/yearPlus" android:layout_width="48dp" android:layout_height="wrap_content" android:text="+" android:contentDescription="Увеличить год" />
-        </LinearLayout>
-        <TextView android:id="@+id/countLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Количество карточек (1–30)" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="8dp" />
-        <EditText android:id="@+id/count" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="1" android:inputType="number" android:maxLength="2" android:singleLine="true" android:text="1" />
-        <Button android:id="@+id/random" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="ОТКРЫТЬ СЛУЧАЙНЫЙ" android:textStyle="bold" android:layout_marginTop="14dp" />
-        <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="Готово" android:textColor="#AEB5C1" android:textSize="14sp" android:layout_marginTop="12dp" android:padding="8dp" />
-        <Button android:id="@+id/database" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="МОЯ БАЗА / СЛУЧАЙНЫЙ ИЗ БАЗЫ" android:layout_marginTop="8dp" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:id="@+id/backupTitle" android:text="РЕЗЕРВНАЯ КОПИЯ" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="16dp" />
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-            <Button android:id="@+id/exportJson" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Экспорт JSON" />
-            <Button android:id="@+id/importJson" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Импорт JSON" android:layout_marginStart="8dp" />
-        </LinearLayout>
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-            <Button android:id="@+id/exportHtml" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Экспорт HTML" />
-            <Button android:id="@+id/importHtml" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Импорт HTML" android:layout_marginStart="8dp" />
-        </LinearLayout>
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:id="@+id/driveTitle" android:text="GOOGLE DRIVE" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:id="@+id/driveDescription" android:text="Откроется системный выбор файлов — выбери Google Drive, чтобы сохранить или загрузить резервную копию." android:textColor="#AEB5C1" android:textSize="13sp" />
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-            <Button android:id="@+id/driveExport" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Сохранить в Drive" />
-            <Button android:id="@+id/driveImport" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Загрузить из Drive" android:layout_marginStart="8dp" />
-        </LinearLayout>
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:id="@+id/githubTitle" android:text="GITHUB GIST" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:id="@+id/githubDescription" android:text="Синхронизирует JSON-базу через приватный GitHub Gist. Требуется личный токен с разрешением gist." android:textColor="#AEB5C1" android:textSize="13sp" />
-        <Button android:id="@+id/githubSync" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="СИНХРОНИЗИРОВАТЬ С GITHUB" android:layout_marginTop="4dp" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="ЗАКЛАДКИ HDREZKA" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
-        <TextView android:id="@+id/hdrezkaDescription" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="Войди в аккаунт HDRezka во встроенном окне и добавь выбранные карточки в папку RANDOM." android:textColor="#AEB5C1" android:textSize="13sp" />
-        <Button android:id="@+id/hdrezkaSync" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="СИНХРОНИЗИРОВАТЬ ЗАКЛАДКИ HDREZKA" android:layout_marginTop="4dp" />
+            <TextView android:id="@+id/domainLabel" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Домен каталога" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
+            <EditText android:id="@+id/domain" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:hint="https://rezkery.com" android:textColor="#FFFFFF" android:textColorHint="#AEB5C1"
+                android:inputType="textUri" android:singleLine="true" android:layout_marginTop="8dp" />
+            <Button android:id="@+id/database" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="МОЯ БАЗА / СЛУЧАЙНЫЙ ИЗ БАЗЫ" android:layout_marginTop="12dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:id="@+id/backupTitle" android:text="РЕЗЕРВНАЯ КОПИЯ" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="16dp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <Button android:id="@+id/exportJson" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Экспорт JSON" />
+                <Button android:id="@+id/importJson" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Импорт JSON" android:layout_marginStart="8dp" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <Button android:id="@+id/exportHtml" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Экспорт HTML" />
+                <Button android:id="@+id/importHtml" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Импорт HTML" android:layout_marginStart="8dp" />
+            </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:id="@+id/driveTitle" android:text="GOOGLE DRIVE" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:id="@+id/driveDescription" android:text="Откроется системный выбор файлов — выбери Google Drive, чтобы сохранить или загрузить резервную копию." android:textColor="#AEB5C1" android:textSize="13sp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <Button android:id="@+id/driveExport" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Сохранить в Drive" />
+                <Button android:id="@+id/driveImport" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Загрузить из Drive" android:layout_marginStart="8dp" />
+            </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:id="@+id/githubTitle" android:text="GITHUB GIST" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:id="@+id/githubDescription" android:text="Синхронизирует JSON-базу через приватный GitHub Gist. Требуется личный токен с разрешением gist." android:textColor="#AEB5C1" android:textSize="13sp" />
+            <Button android:id="@+id/githubSync" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="СИНХРОНИЗИРОВАТЬ С GITHUB" android:layout_marginTop="4dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="ЗАКЛАДКИ HDREZKA" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
+            <TextView android:id="@+id/hdrezkaDescription" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Войди в аккаунт HDRezka во встроенном окне и добавь выбранные карточки в папку RANDOM." android:textColor="#AEB5C1" android:textSize="13sp" />
+            <Button android:id="@+id/hdrezkaSync" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="СИНХРОНИЗИРОВАТЬ ЗАКЛАДКИ HDREZKA" android:layout_marginTop="4dp" />
         </LinearLayout>
         <WebView android:id="@+id/web" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
     </LinearLayout>
