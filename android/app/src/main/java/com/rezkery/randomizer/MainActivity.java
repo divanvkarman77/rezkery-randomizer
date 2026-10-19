@@ -8,6 +8,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebChromeClient;
+import android.webkit.CookieManager;
 import android.widget.*;
 import android.view.View;
 import org.json.*;
@@ -20,7 +22,8 @@ import java.util.*;
 public class MainActivity extends Activity {
     EditText domain, year, count;
     AutoCompleteTextView yearDropdown;
-    Button yearMinus, yearPlus, hdrezkaSyncButton, settingsButton;
+    Button yearMinus, yearPlus, yearDropdownButton, hdrezkaSyncButton, settingsButton;
+    LinearLayout advancedPanel;
     TextView title;
     LinearLayout settingsPanel;
     Spinner requestInterval, protectionCooldown;
@@ -60,9 +63,9 @@ public class MainActivity extends Activity {
         prefs=getSharedPreferences("rzk",0);
         domain=findViewById(R.id.domain); year=findViewById(R.id.year); count=findViewById(R.id.count); type=findViewById(R.id.type);
         status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); title=findViewById(R.id.title); web=findViewById(R.id.web);
-        yearDropdown=findViewById(R.id.year); yearMinus=findViewById(R.id.yearMinus); yearPlus=findViewById(R.id.yearPlus);
+        yearDropdown=findViewById(R.id.year); yearMinus=findViewById(R.id.yearMinus); yearPlus=findViewById(R.id.yearPlus); yearDropdownButton=findViewById(R.id.yearDropdownButton);
         hdrezkaSyncButton=findViewById(R.id.hdrezkaSync); settingsButton=findViewById(R.id.settings);
-        settingsPanel=findViewById(R.id.settingsPanel); requestInterval=findViewById(R.id.requestInterval); protectionCooldown=findViewById(R.id.protectionCooldown);
+        settingsPanel=findViewById(R.id.settingsPanel); advancedPanel=findViewById(R.id.advancedPanel); requestInterval=findViewById(R.id.requestInterval); protectionCooldown=findViewById(R.id.protectionCooldown);
         setupTimeoutControls();
         openMode=findViewById(R.id.openMode);
         simpleModeButton=findViewById(R.id.simpleMode); advancedModeButton=findViewById(R.id.advancedMode);
@@ -84,7 +87,9 @@ public class MainActivity extends Activity {
         ArrayList<String> yearOptions=new ArrayList<>(); for(int y=java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);y>=1900;y--)yearOptions.add(String.valueOf(y));
         ArrayAdapter<String> yearAdapter=new ArrayAdapter<String>(this,android.R.layout.simple_dropdown_item_1line,yearOptions);
         yearDropdown.setAdapter(yearAdapter); yearDropdown.setThreshold(0);
-        yearDropdown.setOnFocusChangeListener((v,hasFocus)->{if(hasFocus)yearDropdown.showDropDown();});
+        yearDropdown.setOnFocusChangeListener((v,hasFocus)->{if(hasFocus){yearDropdown.post(()->yearDropdown.showDropDown());}});
+        yearDropdown.setOnClickListener(v->yearDropdown.showDropDown());
+        yearDropdownButton.setOnClickListener(v->{yearDropdown.requestFocus();yearDropdown.showDropDown();});
         yearMinus.setOnClickListener(v->adjustYear(-1)); yearPlus.setOnClickListener(v->adjustYear(1));
         domain.addTextChangedListener(simpleWatcher("domainAdvanced")); year.addTextChangedListener(simpleWatcher("yearAdvanced")); count.addTextChangedListener(simpleWatcher("countAdvanced"));
         type.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("categoryAdvanced",pos).apply();}public void onNothingSelected(android.widget.AdapterView<?> p){}});
@@ -133,11 +138,12 @@ public class MainActivity extends Activity {
         openMode.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
         openMode.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
         type.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
-        for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton,hdrezkaSyncButton,yearMinus,yearPlus,settingsButton,simpleModeButton,advancedModeButton}){
+        for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton,hdrezkaSyncButton,yearMinus,yearPlus,yearDropdownButton,settingsButton,simpleModeButton,advancedModeButton}){
             b.setTextColor(lightTheme?Color.WHITE:Color.rgb(20,22,26));
             b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(42,91,170):Color.rgb(224,228,234)));
         }
-        themeButton.setText(lightTheme?"☾ Тёмная тема":"☀ Светлая тема");
+        themeButton.setText(lightTheme?"☾":"☀");
+        themeButton.setContentDescription(lightTheme?"Включить тёмную тему":"Включить светлую тему");
         getWindow().setStatusBarColor(bg); getWindow().setNavigationBarColor(bg);
         getWindow().getDecorView().setSystemUiVisibility(lightTheme?ViewFlags.LIGHT_STATUS:0);
         // Force readable dropdown text; the adapter is recreated when theme changes.
@@ -332,11 +338,12 @@ public class MainActivity extends Activity {
     void applyModeVisibility(){
         simpleModeButton.setVisibility(simpleMode?View.GONE:View.VISIBLE);
         advancedModeButton.setVisibility(simpleMode?View.VISIBLE:View.GONE);
-        random.setText(simpleMode?"🎲 ВЫБРАТЬ СЛУЧАЙНУЮ КАРТОЧКУ":"ОТКРЫТЬ СЛУЧАЙНЫЕ КАРТОЧКИ");
+        advancedPanel.setVisibility(simpleMode?View.GONE:View.VISIBLE);
+        random.setVisibility(View.VISIBLE);
+        random.setText(simpleMode?"🎲 ВЫБРАТЬ СЛУЧАЙНУЮ КАРТОЧКУ":"🎲 ВЫБРАТЬ СЛУЧАЙНЫЕ КАРТОЧКИ");
         if(!simpleMode){
-            domain.setText(prefs.getString("domainAdvanced",prefs.getString("domain","https://rezkery.com")));
             year.setText(prefs.getString("yearAdvanced",""));
-            count.setText(prefs.getString("countAdvanced",prefs.getString("pickCount","1")));
+            count.setText(prefs.getString("countAdvanced","1"));
             type.setSelection(Math.max(0,Math.min(prefs.getInt("categoryAdvanced",0),types.length-1)));
         }
     }
@@ -529,13 +536,27 @@ public class MainActivity extends Activity {
     void hdrezkaSyncDialog(){
         if(library.length()==0){setStatus("Локальная база пуста — сначала выбери карточки.");return;}
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);
-        TextView hint=new TextView(this);hint.setText("Войди в свой аккаунт HDRezka в этом окне. После входа нажми «Синхронизировать»: карточки будут добавлены в папку RANDOM.");hint.setPadding(28,20,28,16);box.addView(hint);
-        WebView loginWeb=new WebView(this);loginWeb.getSettings().setJavaScriptEnabled(true);loginWeb.getSettings().setDomStorageEnabled(true);
-        loginWeb.setWebViewClient(new WebViewClient());box.addView(loginWeb,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,0,1));
+        TextView hint=new TextView(this);hint.setText("Войди в аккаунт HDRezka в этом окне. Вход сохранится в WebView приложения; cookies Chrome Android недоступны другим приложениям.");hint.setPadding(28,20,28,16);box.addView(hint);
+        TextView pageStatus=new TextView(this);pageStatus.setText("Открой страницу и выполни вход");pageStatus.setPadding(28,4,28,8);box.addView(pageStatus);
+        WebView loginWeb=new WebView(this);
+        loginWeb.getSettings().setJavaScriptEnabled(true);loginWeb.getSettings().setDomStorageEnabled(true);
+        loginWeb.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);
+        CookieManager cookieManager=CookieManager.getInstance();cookieManager.setAcceptCookie(true);
+        if(android.os.Build.VERSION.SDK_INT>=21)cookieManager.setAcceptThirdPartyCookies(loginWeb,true);
+        loginWeb.setWebChromeClient(new WebChromeClient());
+        loginWeb.setWebViewClient(new WebViewClient(){
+            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){pageStatus.setText("Загрузка страницы…");}
+            @Override public void onPageFinished(WebView view,String url){pageStatus.setText("Если страница показывает ваш аккаунт, нажми «Синхронизировать».");cookieManager.flush();}
+        });
+        int webHeight=(int)(520*getResources().getDisplayMetrics().density);
+        box.addView(loginWeb,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,webHeight));
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Закладки HDRezka").setView(box)
-            .setNegativeButton("Закрыть",(d,w)->loginWeb.destroy()).setNeutralButton("Синхронизировать",null).create();
+            .setNegativeButton("Закрыть",(d,w)->{loginWeb.stopLoading();loginWeb.destroy();})
+            .setNeutralButton("Синхронизировать",null).create();
         dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->syncHdrezkaBookmarks(loginWeb,dialog)));
-        dialog.show();dialog.getWindow().setLayout(LinearLayout.LayoutParams.MATCH_PARENT,Math.max(500,getResources().getDisplayMetrics().heightPixels*3/4));
+        dialog.show();
+        int dialogHeight=Math.min((int)(getResources().getDisplayMetrics().heightPixels*0.9),webHeight+(int)(180*getResources().getDisplayMetrics().density));
+        dialog.getWindow().setLayout(LinearLayout.LayoutParams.MATCH_PARENT,dialogHeight);
         loginWeb.loadUrl(origin()+"/");
     }
     void syncHdrezkaBookmarks(WebView target,AlertDialog dialog){
