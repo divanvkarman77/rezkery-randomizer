@@ -13,6 +13,18 @@
             android:text="Простой режим" android:layout_marginTop="10dp" />
         <Button android:id="@+id/advancedMode" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="Расширенный режим" android:layout_marginTop="4dp" />
+        <Button android:id="@+id/settings" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="⚙ Настройки" android:layout_marginTop="10dp" />
+        <LinearLayout android:id="@+id/settingsPanel" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:visibility="gone">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="ПАУЗА МЕЖДУ ЗАПРОСАМИ" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="10dp" />
+            <Spinner android:id="@+id/requestInterval" android:layout_width="match_parent" android:layout_height="54dp"
+                android:spinnerMode="dropdown" android:paddingStart="10dp" android:paddingEnd="10dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="ПАУЗА ПОСЛЕ АНТИБОТ-ПРОВЕРКИ" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="8dp" />
+            <Spinner android:id="@+id/protectionCooldown" android:layout_width="match_parent" android:layout_height="54dp"
+                android:spinnerMode="dropdown" android:paddingStart="10dp" android:paddingEnd="10dp" />
         <Button android:id="@+id/theme" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="☀ Светлая тема" android:layout_marginTop="12dp" />
         <TextView android:id="@+id/domainLabel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Домен каталога" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="8dp" />
@@ -75,6 +87,7 @@
             android:text="Войди в аккаунт HDRezka во встроенном окне и добавь выбранные карточки в папку RANDOM." android:textColor="#AEB5C1" android:textSize="13sp" />
         <Button android:id="@+id/hdrezkaSync" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="СИНХРОНИЗИРОВАТЬ ЗАКЛАДКИ HDREZKA" android:layout_marginTop="4dp" />
+        </LinearLayout>
         <WebView android:id="@+id/web" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
     </LinearLayout>
 </ScrollView>
