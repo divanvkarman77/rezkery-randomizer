@@ -38,9 +38,10 @@
       <div class="muted" id="syncStatus"></div>
       <div class="settings-divider"></div>
       <strong>Закладки HDRezka</strong>
-      <div class="hint">Синхронизация с папкой RANDOM появится после проверки реального API закладок и авторизации сайта. Cookies браузера не читаются без отдельного разрешения и не передаются автоматически.</div>
-
-    </section>
+      <div class="hint">Откройте HDRezka в браузере, войдите в аккаунт и оставьте эту вкладку активной. Расширение использует вашу текущую сессию и добавит карточки из локальной базы в папку RANDOM (создаст её, если нужно). Пароль и cookies не запрашиваются и не сохраняются.</div>
+      <div class="settings-actions"><button class="primary" id="hdrezkaSyncNow">Синхронизировать RANDOM</button></div>
+      <div class="muted" id="hdrezkaSyncStatus">Нужна активная вкладка HDRezka с авторизацией.</div>
+      </section>
 
     <nav class="tabs">
       <button class="tab active" data-tab="random">Рандом</button>
