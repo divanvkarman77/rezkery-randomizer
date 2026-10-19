@@ -497,7 +497,7 @@ public class MainActivity extends Activity {
     }
     android.text.TextWatcher simpleWatcher(String key){
         return new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}
-            public void onTextChanged(CharSequence s,int start,int before,int count){if(prefs!=null)prefs.edit().putString(key,s.toString()).apply();}
+            public void onTextChanged(CharSequence s,int start,int before,int count){if(prefs!=null){prefs.edit().putString(key,s.toString()).apply();if("domainAdvanced".equals(key))prefs.edit().remove("hdrezkaAuthOrigin").apply();}}
             public void afterTextChanged(android.text.Editable e){}};
     }
 
@@ -704,8 +704,10 @@ public class MainActivity extends Activity {
                     JSONObject answer=new JSONObject(String.valueOf(decoded));
                     if(answer.optBoolean("ok")){
                         cookieManager.flush();loginPassword.setText("");
+                        String activeOrigin=originFromUrl(loginWeb.getUrl());
+                        if(!activeOrigin.isEmpty())prefs.edit().putString("hdrezkaAuthOrigin",activeOrigin).apply();
                         pageStatus.setText("Вход подтверждён. Теперь можно синхронизировать папку RANDOM.");
-                        loginWeb.loadUrl(configuredMirrorOrigin()+"/favorites/");
+                        loginWeb.loadUrl((activeOrigin.isEmpty()?configuredMirrorOrigin():activeOrigin)+"/favorites/");
                     }else pageStatus.setText("Вход не подтверждён: "+answer.optString("error","проверь логин и пароль."));
                 }catch(Exception e){pageStatus.setText("Не удалось прочитать ответ входа: "+e.getMessage());}
             });
@@ -713,7 +715,19 @@ public class MainActivity extends Activity {
         dialog.show();
         int maxHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.84);
         dialog.getWindow().setLayout(LinearLayout.LayoutParams.MATCH_PARENT,maxHeight);
-        loginWeb.loadUrl(configuredMirrorOrigin()+"/");
+        loginWeb.loadUrl(bookmarkOrigin()+"/");
+    }
+    String originFromUrl(String value){
+        try{
+            Uri uri=Uri.parse(value);
+            String scheme=uri.getScheme(),authority=uri.getAuthority();
+            if(uri.getHost()==null||scheme==null||(!scheme.equalsIgnoreCase("http")&&!scheme.equalsIgnoreCase("https")))return "";
+            return scheme+"://"+authority;
+        }catch(Exception e){return "";}
+    }
+    String bookmarkOrigin(){
+        String saved=prefs.getString("hdrezkaAuthOrigin","");
+        return saved.isEmpty()?configuredMirrorOrigin():saved;
     }
     String loginRequestScript(String username,String password){
         String user=JSONObject.quote(username),pass=JSONObject.quote(password);
@@ -722,7 +736,7 @@ public class MainActivity extends Activity {
             "const r=await fetch(new URL('/ajax/login/',location.origin),{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:body.toString()});"+
             "const t=await r.text();let j={};try{j=JSON.parse(t)}catch(e){}if(!r.ok||j.success===false)return JSON.stringify({ok:false,error:j.message||('HTTP '+r.status)});"+
             "await new Promise(resolve=>setTimeout(resolve,"+pause+"));const f=await fetch(new URL('/favorites/',location.origin),{credentials:'include',redirect:'follow'});const h=await f.text();"+
-            "const ok=(j.success===true||/b-favorites_content__cats_list_link/.test(h))&&!/(?:name=['\\"](?:login|email)|Войти в аккаунт|Вход в аккаунт)/i.test(h);"+
+            "const ok=(j.success===true||/b-favorites_content__cats_list_link/.test(h))&&!/(Войти в аккаунт|Вход в аккаунт)/i.test(h);"+
             "return JSON.stringify({ok:ok,error:ok?'':'HDRezka не подтвердила авторизацию; проверь логин, пароль и адрес зеркала.'})"+
             "}catch(e){return JSON.stringify({ok:false,error:String(e.message||e)})}})()";
     }
@@ -789,7 +803,7 @@ public class MainActivity extends Activity {
         if(!prefs.getBoolean("autoSyncBookmarks",false))return;
         long now=System.currentTimeMillis(),last=prefs.getLong("lastAutoBookmarkSync",0L);
         if(now-last<6L*60L*60L*1000L)return;
-        String origin=configuredMirrorOrigin();
+        String origin=bookmarkOrigin();
         String cookies=CookieManager.getInstance().getCookie(origin);
         if(cookies==null||cookies.isEmpty())return;
         prefs.edit().putLong("lastAutoBookmarkSync",now).apply();
