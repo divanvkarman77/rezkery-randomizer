@@ -179,7 +179,14 @@ public class MainActivity extends Activity {
         long protectionCooldown=prefs.getLong("protectionCooldownUntil",0L);
         if(System.currentTimeMillis()<protectionCooldown){
             long minutes=Math.max(1,(protectionCooldown-System.currentTimeMillis()+59999L)/60000L);
-            setStatus("Сайт недавно показал антибот-проверку. Подожди ещё примерно "+minutes+" мин., прежде чем повторить запрос.");return;
+            new AlertDialog.Builder(this).setTitle("Пауза после проверки защиты")
+                .setMessage("Подбор временно приостановлен ещё примерно на "+minutes+" мин. Если ты уже прошёл проверку в браузере, можно сделать один осторожный запрос для проверки.")
+                .setNegativeButton("Подождать",null)
+                .setPositiveButton("Я прошёл проверку — проверить один раз",(d,w)->{
+                    prefs.edit().remove("protectionCooldownUntil").apply();
+                    startRandom();
+                }).show();
+            return;
         }
         String y=simpleMode?"":year.getText().toString().trim();
         if(!y.isEmpty()&&!y.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
