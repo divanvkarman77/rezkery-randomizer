@@ -31,6 +31,12 @@ public class MainActivity extends Activity {
     String[] genres={"","1","2","3","82"};
     String[] openModes={"Открывать в браузере","Открывать в HDRezka App","Спрашивать каждый раз"};
     int pendingPage=-1;
+    int pendingTotal=1, pendingChosen=0, pendingMax=1;
+    ArrayList<Integer> pendingPages=new ArrayList<>();
+    ArrayList<String> pendingUrls=new ArrayList<>();
+    HashSet<String> pendingBatchUrls=new HashSet<>();
+    HashSet<Integer> attemptedPages=new HashSet<>();
+    HashMap<String,String> pendingTitles=new HashMap<>();
     static final int PICK_IMPORT=101, PICK_EXPORT_JSON=102, PICK_EXPORT_HTML=103;
     JSONArray library = new JSONArray();
     boolean lightTheme;
@@ -143,7 +149,9 @@ public class MainActivity extends Activity {
     void startRandom(){
         String y=year.getText().toString().trim();
         if(!y.isEmpty()&&!y.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
-        prefs.edit().putString("domain",origin()).putString("pickCount",count.getText().toString().trim()).apply(); pendingPage=-1;
+        prefs.edit().putString("domain",origin()).putString("pickCount",count.getText().toString().trim()).apply();
+        try { pendingTotal=Math.max(1,Math.min(30,Integer.parseInt(count.getText().toString().trim()))); } catch(Exception e){pendingTotal=1;}
+        pendingChosen=0; pendingUrls.clear(); pendingBatchUrls.clear(); pendingPages.clear(); attemptedPages.clear(); pendingTitles.clear(); pendingPage=-1;
         setStatus("Определяю страницы каталога…"); web.loadUrl(pageUrl(1));
     }
     String parserScript(){
@@ -156,9 +164,58 @@ public class MainActivity extends Activity {
             String raw=value;
             if(raw.startsWith("\"") && raw.endsWith("\"")) raw=(String)new JSONTokener(raw).nextValue();
             JSONObject r=new JSONObject(raw); int max=Math.max(1,r.optInt("max",1)); JSONArray cards=r.optJSONArray("cards");
-            if(pendingPage<0){int page=1+(int)(Math.random()*max);if(page!=1){pendingPage=page;setStatus("Открываю случайную страницу "+page+" из "+max+"…");web.loadUrl(pageUrl(page));return;}}
-            pendingPage=-1; pickFrom(cards);
+            if(pendingChosen==0 && pendingPages.isEmpty() && pendingUrls.isEmpty()){
+                pendingMax=max;
+                int wanted=Math.min(pendingTotal,pendingMax);
+                ArrayList<Integer> all=new ArrayList<>(); for(int p=1;p<=pendingMax;p++)all.add(p);
+                Collections.shuffle(all);
+                for(int i=0;i<wanted;i++)pendingPages.add(all.get(i));
+                loadNextBatchPage(); return;
+            }
+            processBatchPage(cards);
         }catch(Exception e){setStatus("Ошибка чтения страницы: "+e.getMessage());}
+    }
+    void loadNextBatchPage(){
+        if(pendingPages.isEmpty() || pendingChosen>=pendingTotal){finishBatch();return;}
+        pendingPage=pendingPages.remove(0); attemptedPages.add(pendingPage);
+        setStatus("Выбираю карточку "+(pendingChosen+1)+" из "+pendingTotal+" — страница "+pendingPage+"…");
+        web.loadUrl(pageUrl(pendingPage));
+    }
+    void processBatchPage(JSONArray cards) throws Exception {
+        HashSet<String> used=usedUrls(); used.addAll(pendingBatchUrls);
+        ArrayList<JSONObject> candidates=new ArrayList<>();
+        if(cards!=null) for(int i=0;i<cards.length();i++){
+            JSONObject x=cards.getJSONObject(i); String u=x.optString("url","");
+            if(!u.isEmpty()&&!used.contains(u)) candidates.add(x);
+        }
+        if(!candidates.isEmpty()){
+            JSONObject pick=candidates.get(new Random().nextInt(candidates.size()));
+            String u=pick.getString("url"); pendingBatchUrls.add(u); pendingUrls.add(u);
+            pendingTitles.put(u,pick.optString("title",u)); pendingChosen++;
+        }
+        if(pendingChosen<pendingTotal && pendingPages.isEmpty()){
+            ArrayList<Integer> extra=new ArrayList<>();
+            for(int p=1;p<=pendingMax;p++)if(!attemptedPages.contains(p))extra.add(p);
+            Collections.shuffle(extra);
+            for(int p:extra){pendingPages.add(p);if(pendingPages.size()>=pendingTotal-pendingChosen)break;}
+        }
+        if(!pendingPages.isEmpty() && pendingChosen<pendingTotal){loadNextBatchPage();return;}
+        finishBatch();
+    }
+    void finishBatch(){
+        try{
+            if(pendingUrls.isEmpty()){setStatus("Не удалось найти новые карточки на разных страницах. Попробуй снова.");return;}
+            for(String u:pendingUrls){
+                JSONObject record=new JSONObject();record.put("url",u);record.put("title",pendingTitles.containsKey(u)?pendingTitles.get(u):u);
+                record.put("date",System.currentTimeMillis());record.put("domain",origin());library.put(record);
+            }
+            saveLibrary();
+            int mode=prefs.getInt("openMode",0);
+            if(mode==1){openFilm(pendingUrls.get(0));setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц. В HDRezka App открыта первая; остальные сохранены в базе. Всего записей: "+library.length());}
+            else {for(String u:pendingUrls)openFilm(u);setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц и сохранено в базе. Всего записей: "+library.length());}
+            String ghToken=prefs.getString("ghToken","");if(!ghToken.isEmpty())syncGithub(ghToken,prefs.getString("ghGist",""));
+        }catch(Exception e){setStatus("Ошибка сохранения выбранных карточек: "+e.getMessage());}
+        finally{pendingPage=-1;pendingTotal=1;pendingChosen=0;pendingPages.clear();pendingBatchUrls.clear();pendingUrls.clear();attemptedPages.clear();pendingTitles.clear();}
     }
     void pickFrom(JSONArray cards){
         try{
