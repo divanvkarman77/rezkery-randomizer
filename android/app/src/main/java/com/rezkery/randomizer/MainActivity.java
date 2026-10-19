@@ -12,6 +12,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.CookieManager;
 import android.widget.*;
 import android.view.View;
+import android.view.WindowManager;
 import org.json.*;
 import java.io.*;
 import java.net.HttpURLConnection;
@@ -20,7 +21,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class MainActivity extends Activity {
-    EditText domain, year, count;
+    EditText domain, year, count, simpleCount;
+    CheckBox avoidSameYear;
     AutoCompleteTextView yearDropdown;
     Button yearMinus, yearPlus, yearDropdownButton, hdrezkaSyncButton, settingsButton;
     LinearLayout advancedPanel;
@@ -48,6 +50,10 @@ public class MainActivity extends Activity {
     long batchToken=0, lastPageStarted=0;
     boolean randomInProgress=false;
     String batchNotice="";
+    boolean batchSimpleMode=true, batchAvoidSameYear=false;
+    String batchOrigin="https://rezkery.com", batchYear="";
+    int batchType=0;
+    HashSet<String> batchYears=new HashSet<>();
 
     ArrayList<Integer> pendingPages=new ArrayList<>();
     ArrayList<String> pendingUrls=new ArrayList<>();
@@ -61,7 +67,7 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle b){
         super.onCreate(b); setContentView(R.layout.activity_main);
         prefs=getSharedPreferences("rzk",0);
-        domain=findViewById(R.id.domain); year=findViewById(R.id.year); count=findViewById(R.id.count); type=findViewById(R.id.type);
+        domain=findViewById(R.id.domain); year=findViewById(R.id.year); count=findViewById(R.id.count); simpleCount=findViewById(R.id.simpleCount); avoidSameYear=findViewById(R.id.avoidSameYear); type=findViewById(R.id.type);
         status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); title=findViewById(R.id.title); web=findViewById(R.id.web);
         yearDropdown=findViewById(R.id.year); yearMinus=findViewById(R.id.yearMinus); yearPlus=findViewById(R.id.yearPlus); yearDropdownButton=findViewById(R.id.yearDropdownButton);
         hdrezkaSyncButton=findViewById(R.id.hdrezkaSync); settingsButton=findViewById(R.id.settings);
@@ -76,6 +82,9 @@ public class MainActivity extends Activity {
         importHtmlButton=findViewById(R.id.importHtml); driveExportButton=findViewById(R.id.driveExport);
         driveImportButton=findViewById(R.id.driveImport); githubButton=findViewById(R.id.githubSync);
         domain.setText(prefs.getString("domainAdvanced",prefs.getString("domain","https://rezkery.com")));
+        simpleCount.setText(prefs.getString("simpleCount","1"));
+        avoidSameYear.setChecked(prefs.getBoolean("avoidSameYear",false));
+        avoidSameYear.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("avoidSameYear",checked).apply());
         year.setText(prefs.getString("yearAdvanced","")); count.setText(prefs.getString("countAdvanced",prefs.getString("pickCount","1")));
         lightTheme=prefs.getBoolean("lightTheme",false);
         type.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,types) {{
@@ -84,14 +93,14 @@ public class MainActivity extends Activity {
         openMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {{ setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }});
         openMode.setSelection(Math.max(0,Math.min(prefs.getInt("openMode",0),openModes.length-1)));
         type.setSelection(Math.max(0,Math.min(prefs.getInt("categoryAdvanced",0),types.length-1)));
-        ArrayList<String> yearOptions=new ArrayList<>(); for(int y=java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);y>=1900;y--)yearOptions.add(String.valueOf(y));
+        ArrayList<String> yearOptions=new ArrayList<>(); for(int y=maximumSelectableYear();y>=1900;y--)yearOptions.add(String.valueOf(y));
         ArrayAdapter<String> yearAdapter=new ArrayAdapter<String>(this,android.R.layout.simple_dropdown_item_1line,yearOptions);
         yearDropdown.setAdapter(yearAdapter); yearDropdown.setThreshold(0);
         yearDropdown.setOnFocusChangeListener((v,hasFocus)->{if(hasFocus){yearDropdown.post(()->yearDropdown.showDropDown());}});
         yearDropdown.setOnClickListener(v->yearDropdown.showDropDown());
         yearDropdownButton.setOnClickListener(v->{yearDropdown.requestFocus();yearDropdown.showDropDown();});
         yearMinus.setOnClickListener(v->adjustYear(-1)); yearPlus.setOnClickListener(v->adjustYear(1));
-        domain.addTextChangedListener(simpleWatcher("domainAdvanced")); year.addTextChangedListener(simpleWatcher("yearAdvanced")); count.addTextChangedListener(simpleWatcher("countAdvanced"));
+        domain.addTextChangedListener(simpleWatcher("domainAdvanced")); year.addTextChangedListener(simpleWatcher("yearAdvanced")); count.addTextChangedListener(simpleWatcher("countAdvanced")); simpleCount.addTextChangedListener(simpleWatcher("simpleCount"));
         type.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("categoryAdvanced",pos).apply();}public void onNothingSelected(android.widget.AdapterView<?> p){}});
         openMode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
             public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("openMode",pos).apply();}
@@ -103,8 +112,8 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView v,String u){ v.evaluateJavascript(parserScript(), value -> handleParsed(value)); }
         });
         random.setOnClickListener(v->startRandom());
-        simpleModeButton.setOnClickListener(v->{simpleMode=true;prefs.edit().putBoolean("simpleMode",true).apply();applyModeVisibility();});
-        advancedModeButton.setOnClickListener(v->{simpleMode=false;prefs.edit().putBoolean("simpleMode",false).apply();applyModeVisibility();});
+        simpleModeButton.setOnClickListener(v->switchMode(true));
+        advancedModeButton.setOnClickListener(v->switchMode(false));
         themeButton.setOnClickListener(v->{lightTheme=!lightTheme;prefs.edit().putBoolean("lightTheme",lightTheme).apply();applyTheme();});
         databaseButton.setOnClickListener(v->showDatabase());
         exportJsonButton.setOnClickListener(v->chooseExport(PICK_EXPORT_JSON,"rezkery-database.json","application/json"));
@@ -147,7 +156,7 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(bg); getWindow().setNavigationBarColor(bg);
         getWindow().getDecorView().setSystemUiVisibility(lightTheme?ViewFlags.LIGHT_STATUS:0);
         // Force readable dropdown text; the adapter is recreated when theme changes.
-        ArrayList<String> yearOptions=new ArrayList<>();for(int y=java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);y>=1900;y--)yearOptions.add(String.valueOf(y));
+        ArrayList<String> yearOptions=new ArrayList<>();for(int y=maximumSelectableYear();y>=1900;y--)yearOptions.add(String.valueOf(y));
         yearDropdown.setDropDownBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
         yearDropdown.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_dropdown_item_1line,yearOptions){
             @Override public android.view.View getView(int position,android.view.View convert,android.view.ViewGroup parent){
@@ -197,11 +206,14 @@ public class MainActivity extends Activity {
         return d.replaceAll("/+$","");
     }
     String pageUrl(int page){
-        int t=simpleMode?0:type.getSelectedItemPosition(); String y=simpleMode?"":year.getText().toString().trim(); String g=genres[t];
-        String path;
-        if(!y.isEmpty()) path=origin()+"/year/"+y+(page>1?"/page/"+page+"/":"/");
-        else path=origin()+(page>1?"/page/"+page+"/":"/");
-        return path+(g.isEmpty()?"":"?filter=last&genre="+g);
+        boolean simple=randomInProgress?batchSimpleMode:simpleMode;
+        String host=randomInProgress?batchOrigin:origin();
+        String selectedYear=randomInProgress?batchYear:(simple?"":year.getText().toString().trim());
+        int selectedType=randomInProgress?batchType:(simple?0:type.getSelectedItemPosition());
+        String genre=genres[Math.max(0,Math.min(selectedType,genres.length-1))];
+        String path=selectedYear.isEmpty()?host+(page>1?"/page/"+page+"/":"/"):
+            host+"/year/"+selectedYear+(page>1?"/page/"+page+"/":"/");
+        return path+(genre.isEmpty()?"":"?filter=last&genre="+genre);
     }
     void startRandom(){
         long protectionCooldown=prefs.getLong("protectionCooldownUntil",0L);
@@ -216,18 +228,25 @@ public class MainActivity extends Activity {
                 }).show();
             return;
         }
-        String y=simpleMode?"":year.getText().toString().trim();
-        if(!y.isEmpty()&&!y.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
         if(randomInProgress){setStatus("Подбор уже выполняется. Подожди завершения.");return;}
-        if(!simpleMode)prefs.edit().putString("domainAdvanced",origin()).putString("yearAdvanced",y).putString("countAdvanced",count.getText().toString().trim()).putInt("categoryAdvanced",type.getSelectedItemPosition()).apply();
-        try { pendingTotal=simpleMode?1:Math.max(1,Math.min(30,Integer.parseInt(count.getText().toString().trim()))); } catch(Exception e){pendingTotal=1;}
-        pendingChosen=0; pendingUrls.clear(); pendingBatchUrls.clear(); pendingPages.clear(); attemptedPages.clear(); pendingTitles.clear(); pendingPage=-1;
+        batchSimpleMode=simpleMode;
+        batchOrigin=origin();
+        batchYear=simpleMode?"":year.getText().toString().trim();
+        batchType=simpleMode?0:type.getSelectedItemPosition();
+        if(!batchYear.isEmpty()&&!batchYear.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
+        if(!simpleMode)prefs.edit().putString("domainAdvanced",batchOrigin).putString("yearAdvanced",batchYear).putString("countAdvanced",count.getText().toString().trim()).putInt("categoryAdvanced",batchType).apply();
+        try {
+            int selected=simpleMode?Integer.parseInt(simpleCount.getText().toString().trim()):Integer.parseInt(count.getText().toString().trim());
+            pendingTotal=Math.max(1,Math.min(30,selected));
+        }catch(Exception e){pendingTotal=1;}
+        batchAvoidSameYear=prefs.getBoolean("avoidSameYear",false)&&batchYear.isEmpty();
+        pendingChosen=0; pendingUrls.clear(); pendingBatchUrls.clear(); pendingPages.clear(); attemptedPages.clear(); pendingTitles.clear(); pendingPage=-1;batchYears.clear();
         randomInProgress=true;batchNotice="";batchToken++;lastPageStarted=android.os.SystemClock.elapsedRealtime();
         setStatus("Проверяю каталог…"); web.loadUrl(pageUrl(1));
     }
     String parserScript(){
         return "(function(){var cards=[],seen={};var ns=document.querySelectorAll('.b-content__inline_item');"+
-        "for(var i=0;i<ns.length;i++){var n=ns[i],a=n.querySelector('a[href]');if(!a)continue;var u=a.href;if(seen[u])continue;seen[u]=1;var l=n.querySelector('.b-content__inline_item-link');cards.push({url:u,title:(l?l.innerText:a.innerText||'Без названия').trim()});}"+
+        "for(var i=0;i<ns.length;i++){var n=ns[i],a=n.querySelector('a[href]');if(!a)continue;var u=a.href;if(seen[u])continue;seen[u]=1;var l=n.querySelector('.b-content__inline_item-link'),years=(n.innerText||'').match(/(19|20|21)\d{2}/g)||[],urlYears=u.match(/(19|20|21)\d{2}/g)||[],ym=urlYears.length?urlYears[urlYears.length-1]:(years.length?years[years.length-1]:'');cards.push({url:u,title:(l?l.innerText:a.innerText||'Без названия').trim(),year:ym});}"+
         "var max=1,as=document.querySelectorAll('a[href]');for(var j=0;j<as.length;j++){var h=as[j].href,m=h.match(/\\/page\\/(\\d+)\\/?(?:\\?.*)?$/);if(m)max=Math.max(max,parseInt(m[1],10)||1);}"+
         "var title=document.title||'',body=document.body?(document.body.innerText||'').slice(0,4000):'',challenge=/anubis|cloudflare|cdn-cgi\\/challenge|challenge-platform|captcha|checking your browser|just a moment|провер(ка|ьте).*человек|подтвердите.*человек/i.test(location.href+' '+title+' '+body)||!!document.querySelector('#challenge-form,.cf-challenge,#anubis_challenge,[data-anubis]');"+
         "return JSON.stringify({cards:cards,max:max,challenge:challenge,title:title});})()";
@@ -282,17 +301,26 @@ public class MainActivity extends Activity {
     }
     void processBatchPage(JSONArray cards) throws Exception {
         HashSet<String> used=usedUrls(); used.addAll(pendingBatchUrls);
-        ArrayList<JSONObject> candidates=new ArrayList<>();
+        ArrayList<JSONObject> candidates=new ArrayList<>(), sameYearCandidates=new ArrayList<>();
         if(cards!=null) for(int i=0;i<cards.length();i++){
             JSONObject x=cards.getJSONObject(i); String u=x.optString("url","");
-            if(!u.isEmpty()&&!used.contains(u)) candidates.add(x);
+            if(!u.isEmpty()&&!used.contains(u)){
+                String cardYear=x.optString("year","");
+                if(!batchAvoidSameYear||cardYear.isEmpty()||!batchYears.contains(cardYear))candidates.add(x);
+                else sameYearCandidates.add(x);
+            }
         }
         if(!candidates.isEmpty()){
             JSONObject pick=candidates.get(new Random().nextInt(candidates.size()));
-            String u=pick.getString("url"); pendingBatchUrls.add(u); pendingUrls.add(u);
-            pendingTitles.put(u,pick.optString("title",u)); pendingChosen++;
+            String u=pick.getString("url"), cardYear=pick.optString("year","");
+            pendingBatchUrls.add(u); pendingUrls.add(u);pendingTitles.put(u,pick.optString("title",u));
+            if(!cardYear.isEmpty())batchYears.add(cardYear);
+            pendingChosen++;
         }
         if(!pendingPages.isEmpty() && pendingChosen<pendingTotal){loadNextBatchPage();return;}
+        if(pendingUrls.size()<pendingTotal&&batchAvoidSameYear&&!sameYearCandidates.isEmpty()&&pendingPages.isEmpty()){
+            batchNotice="На оставшихся проверенных страницах уже выбранные года повторялись — поэтому карточек получилось меньше количества в настройках.";
+        }
         finishBatch();
     }
     void finishBatch(){
@@ -304,7 +332,7 @@ public class MainActivity extends Activity {
             }
             for(String u:pendingUrls){
                 JSONObject record=new JSONObject();record.put("url",u);record.put("title",pendingTitles.containsKey(u)?pendingTitles.get(u):u);
-                record.put("date",System.currentTimeMillis());record.put("domain",origin());library.put(record);
+                record.put("date",System.currentTimeMillis());record.put("domain",batchOrigin);library.put(record);
             }
             saveLibrary();
             int mode=prefs.getInt("openMode",0);openBatch(new ArrayList<>(pendingUrls),mode);
@@ -345,6 +373,11 @@ public class MainActivity extends Activity {
         }catch(Exception e){setStatus("Ошибка: "+e.getMessage());}
     }
 
+    void switchMode(boolean simple){
+        if(randomInProgress){setStatus("Сначала дождись завершения текущего подбора, затем переключи режим.");return;}
+        if(simpleMode==simple)return;
+        simpleMode=simple;prefs.edit().putBoolean("simpleMode",simple).apply();applyModeVisibility();
+    }
     void applyModeVisibility(){
         simpleModeButton.setVisibility(simpleMode?View.GONE:View.VISIBLE);
         advancedModeButton.setVisibility(simpleMode?View.VISIBLE:View.GONE);
@@ -439,10 +472,11 @@ public class MainActivity extends Activity {
         if(mode==1){openFilmWithMode(urls.get(0),1);return;}
         for(int i=0;i<urls.size();i++){final String u=urls.get(i);new android.os.Handler(getMainLooper()).postDelayed(()->openFilmWithMode(u,0),i*650L);}
     }
+    int maximumSelectableYear(){return Math.max(2027,java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)+20);}
     void adjustYear(int delta){
         String raw=year.getText().toString().trim();int current;
         try{current=Integer.parseInt(raw);}catch(Exception e){current=java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);}
-        int next=Math.max(1900,Math.min(java.util.Calendar.getInstance().get(java.util.Calendar.YEAR),current+delta));
+        int next=Math.max(1900,Math.min(maximumSelectableYear(),current+delta));
         year.setText(String.valueOf(next));year.setSelection(year.length());
     }
     android.text.TextWatcher simpleWatcher(String key){
@@ -543,43 +577,74 @@ public class MainActivity extends Activity {
                 prefs.edit().putString("ghToken",t).putString("ghGist",g).apply();syncGithub(t,g);
             }).show();
     }
+    String configuredMirrorOrigin(){
+        String configured=domain.getText().toString().trim();
+        if(configured.isEmpty())configured=prefs.getString("domainAdvanced","https://rezkery.com");
+        if(!configured.matches("(?i)^https?://.*"))configured="https://"+configured;
+        return configured.replaceAll("/+$","");
+    }
+    String openLoginFormScript(){
+        return "(function(){"+
+            "const visible=e=>!!(e&&e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden');"+
+            "const forms=[...document.querySelectorAll('input[type=password]')];if(forms.some(visible))return 'form';"+
+            "const els=[...document.querySelectorAll('a,button,[role=button],[onclick]')].filter(visible);"+
+            "const re=/(войти|вход|авторизац|sign.?in|log.?in)/i;"+
+            "let e=els.find(x=>re.test((x.innerText||'')+' '+(x.getAttribute('aria-label')||'')+' '+(x.getAttribute('title')||'')));"+
+            "if(!e)e=els.find(x=>/login|auth|account/i.test((x.getAttribute('href')||'')+' '+x.className));"+
+            "if(e){const href=e.getAttribute('href');if(href&&!href.startsWith('#')&&!/^javascript:/i.test(href)&&!(/login|auth/i.test(location.href)))location.href=e.href;else e.click();return 'opened';}"+
+            "return 'missing';})()";
+    }
     void hdrezkaSyncDialog(){
         if(library.length()==0){setStatus("Локальная база пуста — сначала выбери карточки.");return;}
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);
-        TextView hint=new TextView(this);hint.setText("Войди в аккаунт HDRezka в этом окне. Вход сохранится в WebView приложения; cookies Chrome Android недоступны другим приложениям.");hint.setPadding(28,20,28,16);box.addView(hint);
-        TextView pageStatus=new TextView(this);pageStatus.setText("Открой страницу и выполни вход");pageStatus.setPadding(28,4,28,8);box.addView(pageStatus);
+        TextView hint=new TextView(this);hint.setText("Вход откроется на выбранном в настройках зеркале. Если сайт запросит проверку, пройди её вручную.");hint.setPadding(28,16,28,12);box.addView(hint);
+        TextView pageStatus=new TextView(this);pageStatus.setText("Открываю форму входа…");pageStatus.setPadding(28,4,28,8);box.addView(pageStatus);
         WebView loginWeb=new WebView(this);
+        loginWeb.setFocusable(true);loginWeb.setFocusableInTouchMode(true);
         loginWeb.getSettings().setJavaScriptEnabled(true);loginWeb.getSettings().setDomStorageEnabled(true);
-        loginWeb.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);
-        loginWeb.getSettings().setSupportMultipleWindows(false);
-        String browserAgent=loginWeb.getSettings().getUserAgentString();
-        loginWeb.getSettings().setUserAgentString(browserAgent.replace("; wv",""));
+        loginWeb.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);loginWeb.getSettings().setSupportMultipleWindows(false);
+        loginWeb.getSettings().setUseWideViewPort(true);loginWeb.getSettings().setLoadWithOverviewMode(true);
+        loginWeb.getSettings().setBuiltInZoomControls(true);loginWeb.getSettings().setDisplayZoomControls(false);loginWeb.getSettings().setTextZoom(100);
+        String browserAgent=loginWeb.getSettings().getUserAgentString();loginWeb.getSettings().setUserAgentString(browserAgent.replace("; wv",""));
         CookieManager cookieManager=CookieManager.getInstance();cookieManager.setAcceptCookie(true);
         if(android.os.Build.VERSION.SDK_INT>=21)cookieManager.setAcceptThirdPartyCookies(loginWeb,true);
         loginWeb.setWebChromeClient(new WebChromeClient());
         loginWeb.setWebViewClient(new WebViewClient(){
-            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){pageStatus.setText("Загрузка страницы…");}
+            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){pageStatus.setText("Загрузка формы входа…");}
             @Override public void onPageFinished(WebView view,String url){
                 cookieManager.flush();
                 view.evaluateJavascript("(document.title+' '+(document.body?document.body.innerText:'' )).slice(0,2500)",value->{
                     String pageText="";
                     try{Object decoded=new JSONTokener(value==null?"":value).nextValue();pageText=String.valueOf(decoded).toLowerCase(Locale.ROOT);}catch(Exception ignored){}
-                    if(pageText.matches("(?s).*(anubis|cloudflare|captcha|провер(ка|ьте).*человек|подтвердите.*человек).*"))
-                        pageStatus.setText("HDRezka просит пройти проверку на бота. Заверши её на странице и дождись загрузки сайта.");
-                    else pageStatus.setText("Войди в аккаунт. После успешного входа нажми «Синхронизировать».");
+                    if(pageText.matches("(?s).*(anubis|cloudflare|captcha|провер(ка|ьте).*человек|подтвердите.*человек).*")){
+                        pageStatus.setText("Сайт запросил проверку на бота. Пройди её в окне и дождись загрузки страницы.");
+                        return;
+                    }
+                    view.evaluateJavascript(openLoginFormScript(),result->{
+                        String outcome="";
+                        try{Object decoded=new JSONTokener(result==null?"":result).nextValue();outcome=String.valueOf(decoded);}catch(Exception ignored){}
+                        if("opened".equals(outcome)||"form".equals(outcome))pageStatus.setText("Форма авторизации открыта. Нажми поля логина или пароля, чтобы вызвать клавиатуру.");
+                        else pageStatus.setText("На этой странице не найдена кнопка входа. Проверь адрес зеркала в настройках или открой меню аккаунта.");
+                    });
                 });
             }
         });
         int webHeight=(int)(520*getResources().getDisplayMetrics().density);
         box.addView(loginWeb,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,webHeight));
+        boolean[] webDestroyed={false};
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Закладки HDRezka").setView(box)
-            .setNegativeButton("Закрыть",(d,w)->{loginWeb.stopLoading();loginWeb.destroy();})
+            .setNegativeButton("Закрыть",(d,w)->{webDestroyed[0]=true;loginWeb.stopLoading();loginWeb.destroy();})
             .setNeutralButton("Синхронизировать",null).create();
-        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->syncHdrezkaBookmarks(loginWeb,dialog)));
+        dialog.setOnShowListener(d->{
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->syncHdrezkaBookmarks(loginWeb,dialog));
+            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+            loginWeb.requestFocus(View.FOCUS_DOWN);
+        });
+        dialog.setOnDismissListener(d->{if(!webDestroyed[0]){webDestroyed[0]=true;loginWeb.stopLoading();loginWeb.destroy();}});
         dialog.show();
         int dialogHeight=Math.min((int)(getResources().getDisplayMetrics().heightPixels*0.9),webHeight+(int)(180*getResources().getDisplayMetrics().density));
         dialog.getWindow().setLayout(LinearLayout.LayoutParams.MATCH_PARENT,dialogHeight);
-        loginWeb.loadUrl(origin()+"/");
+        loginWeb.loadUrl(configuredMirrorOrigin()+"/");
     }
     void syncHdrezkaBookmarks(WebView target,AlertDialog dialog){
         JSONArray movies=new JSONArray();
