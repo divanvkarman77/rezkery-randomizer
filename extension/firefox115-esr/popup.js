@@ -539,6 +539,97 @@
     }).catch(function(e){$('#syncStatus').textContent='Ошибка синхронизации: '+(e.message||'неизвестная ошибка');});
   }
 
+
+  function hdrezkaSync() {
+    var status = $('#hdrezkaSyncStatus');
+    status.textContent = 'Проверяю авторизацию HDRezka…';
+    queryTabs({active:true,currentWindow:true}).then(function(tabs) {
+      var tab=tabs && tabs[0];
+      if(!tab || !tab.id || !tab.url) throw new Error('Откройте HDRezka в активной вкладке и войдите в свой аккаунт.');
+      var host;
+      try { host = new URL(tab.url).hostname; } catch(e) { throw new Error('Не удалось определить адрес активной вкладки.'); }
+      if (!/(rezka|hdrzk)/i.test(host)) throw new Error('Откройте HDRezka (войдите в аккаунт) в активной вкладке и повторите синхронизацию.');
+      return loadDb().then(function(db) {
+        if (!db.length) throw new Error('Локальная база пуста — сначала выберите карточки.');
+        return API.scripting.executeScript({
+          target:{tabId:tab.id},
+          args:[db.map(function(m){return {url:m.url,title:m.title||m.name||''};})],
+          func: async function(movies) {
+            function postId(url) {
+              try {
+                var p = new URL(url).pathname;
+                var m = p.match(/(?:^|\/)(\d+)-[^/]+\.html?$/i) || p.match(/(?:^|\/)(\d+)(?:\/|$)/);
+                return m ? m[1] : '';
+              } catch(e) { return ''; }
+            }
+            async function getText(url) {
+              var r = await fetch(url,{credentials:'include',redirect:'follow'});
+              if(!r.ok) throw new Error('HTTP '+r.status+' при чтении '+url);
+              return await r.text();
+            }
+            async function api(data) {
+              var r = await fetch(new URL('/ajax/favorites/',location.origin).href,{
+                method:'POST',credentials:'include',
+                headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},
+                body:new URLSearchParams(data).toString()
+              });
+              var t=await r.text(); var j;
+              try { j=JSON.parse(t); } catch(e) { throw new Error('HDRezka вернула не JSON. Возможно, сессия истекла или зеркало изменило API.'); }
+              if(!r.ok || j.success===false) throw new Error(j.message || ('Ошибка закладок HTTP '+r.status));
+              return j;
+            }
+            var favHtml=await getText(new URL('/favorites/',location.origin).href);
+            if(/name=["'](?:login|email)["']|Войти в аккаунт|Вход в аккаунт/i.test(favHtml) && !/b-favorites_content__cats_list_link/.test(favHtml)) {
+              throw new Error('Не вижу авторизованные закладки. Войдите в HDRezka в этой вкладке и повторите.');
+            }
+            var doc=new DOMParser().parseFromString(favHtml,'text/html');
+            var cats=Array.from(doc.querySelectorAll('a.b-favorites_content__cats_list_link'));
+            var cat=null;
+            cats.forEach(function(a){
+              var name=(a.querySelector('.name')||a).textContent.trim();
+              if(name.toLocaleUpperCase() === 'RANDOM') {
+                var m=(a.getAttribute('href')||'').match(/\/favorites\/(\d+)/);
+                if(m) cat=m[1];
+              }
+            });
+            if(!cat) {
+              var created=await api({action:'add_cat',name:'RANDOM'});
+              cat=String(created.id || (created.data && created.data.id) || '');
+              if(!cat) {
+                var refreshed= new DOMParser().parseFromString(await getText(new URL('/favorites/',location.origin).href),'text/html');
+                Array.from(refreshed.querySelectorAll('a.b-favorites_content__cats_list_link')).forEach(function(a){
+                  var name=(a.querySelector('.name')||a).textContent.trim(), m=(a.getAttribute('href')||'').match(/\/favorites\/(\d+)/);
+                  if(name.toLocaleUpperCase()==='RANDOM'&&m) cat=m[1];
+                });
+              }
+              if(!cat) throw new Error('Папка RANDOM не создана или HDRezka не вернула её ID.');
+            }
+            var categoryHtml=await getText(new URL('/favorites/'+cat+'/',location.origin).href);
+            var cdoc=new DOMParser().parseFromString(categoryHtml,'text/html'), existing=Object.create(null);
+            cdoc.querySelectorAll('a[href]').forEach(function(a){var id=postId(a.href);if(id)existing[id]=true;});
+            var added=0, skipped=0, failed=[];
+            for(var i=0;i<movies.length;i++) {
+              var id=postId(movies[i].url);
+              if(!id) {failed.push((movies[i].title||movies[i].url)+': не удалось извлечь ID фильма из URL');continue;}
+              if(existing[id]) {skipped++;continue;}
+              try {
+                await api({action:'add_post',post_id:id,cat_id:cat});
+                existing[id]=true;added++;
+              } catch(e) {failed.push((movies[i].title||id)+': '+(e.message||'ошибка API'));}
+            }
+            return {ok:true,categoryId:cat,added:added,skipped:skipped,failed:failed,processed:movies.length};
+          }
+        });
+      }).then(function(results) {
+        var result=results && results[0] && results[0].result;
+        if(!result || !result.ok) throw new Error('HDRezka не вернула результат синхронизации.');
+        var msg='RANDOM: добавлено '+result.added+', уже было '+result.skipped+'.';
+        if(result.failed && result.failed.length) msg+=' Ошибки: '+result.failed.slice(0,3).join(' | ');
+        status.textContent=msg;
+      });
+    }).catch(function(e) { status.textContent='Синхронизация не выполнена: '+(e.message||'ошибка'); });
+  }
+
   function setupSettingsUi() {
     $('#domainInput').value = BASE_ORIGIN;
     $('#settingsStatus').textContent = 'Текущий домен: ' + BASE_ORIGIN;
@@ -552,6 +643,7 @@
     $('#settingsExportJson').addEventListener('click', exportJson);
     $('#settingsImportFile').addEventListener('change', function () { importFile(this.files && this.files[0]); });
     $('#githubSyncNow').addEventListener('click', githubSync);
+    $('#hdrezkaSyncNow').addEventListener('click', hdrezkaSync);
     $('#settingsButton').addEventListener('click', function () { $('#domainInput').value = BASE_ORIGIN; $('#settingsPanel').classList.add('active'); loadSyncSettings(); });
   }
 
