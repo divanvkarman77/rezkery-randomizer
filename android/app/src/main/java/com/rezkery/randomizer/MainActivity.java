@@ -164,7 +164,7 @@ public class MainActivity extends Activity {
             String raw=value;
             if(raw.startsWith("\"") && raw.endsWith("\"")) raw=(String)new JSONTokener(raw).nextValue();
             JSONObject r=new JSONObject(raw); int max=Math.max(1,r.optInt("max",1)); JSONArray cards=r.optJSONArray("cards");
-            if(pendingChosen==0 && pendingPages.isEmpty() && pendingUrls.isEmpty()){
+            if(pendingPage==-1 && pendingChosen==0 && pendingUrls.isEmpty()){
                 pendingMax=max;
                 int wanted=Math.min(pendingTotal,pendingMax);
                 ArrayList<Integer> all=new ArrayList<>(); for(int p=1;p<=pendingMax;p++)all.add(p);
