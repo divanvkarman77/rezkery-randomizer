@@ -35,6 +35,11 @@ public class MainActivity extends Activity {
     String[] openModes={"Открывать в браузере","Открывать в HDRezka App","Спрашивать каждый раз"};
     int pendingPage=-1;
     int pendingTotal=1, pendingChosen=0, pendingMax=1;
+    int maxPageChecks=1;
+    long batchToken=0, lastPageStarted=0;
+    boolean randomInProgress=false;
+    String batchNotice="";
+    static final long MIN_PAGE_INTERVAL_MS=1800L;
     ArrayList<Integer> pendingPages=new ArrayList<>();
     ArrayList<String> pendingUrls=new ArrayList<>();
     HashSet<String> pendingBatchUrls=new HashSet<>();
@@ -173,40 +178,64 @@ public class MainActivity extends Activity {
     void startRandom(){
         String y=simpleMode?"":year.getText().toString().trim();
         if(!y.isEmpty()&&!y.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
+        if(randomInProgress){setStatus("Подбор уже выполняется. Подожди завершения.");return;}
         if(!simpleMode)prefs.edit().putString("domainAdvanced",origin()).putString("yearAdvanced",y).putString("countAdvanced",count.getText().toString().trim()).putInt("categoryAdvanced",type.getSelectedItemPosition()).apply();
         try { pendingTotal=simpleMode?1:Math.max(1,Math.min(30,Integer.parseInt(count.getText().toString().trim()))); } catch(Exception e){pendingTotal=1;}
         pendingChosen=0; pendingUrls.clear(); pendingBatchUrls.clear(); pendingPages.clear(); attemptedPages.clear(); pendingTitles.clear(); pendingPage=-1;
-        setStatus("Определяю страницы каталога…"); web.loadUrl(pageUrl(1));
+        randomInProgress=true;batchNotice="";batchToken++;lastPageStarted=android.os.SystemClock.elapsedRealtime();
+        setStatus("Проверяю каталог…"); web.loadUrl(pageUrl(1));
     }
     String parserScript(){
         return "(function(){var cards=[],seen={};var ns=document.querySelectorAll('.b-content__inline_item');"+
         "for(var i=0;i<ns.length;i++){var n=ns[i],a=n.querySelector('a[href]');if(!a)continue;var u=a.href;if(seen[u])continue;seen[u]=1;var l=n.querySelector('.b-content__inline_item-link');cards.push({url:u,title:(l?l.innerText:a.innerText||'Без названия').trim()});}"+
-        "var max=1,as=document.querySelectorAll('a[href]');for(var j=0;j<as.length;j++){var h=as[j].href,m=h.match(/\\/page\\/(\\d+)\\/?(?:\\?.*)?$/);if(m)max=Math.max(max,parseInt(m[1],10)||1);}return JSON.stringify({cards:cards,max:max});})()";
+        "var max=1,as=document.querySelectorAll('a[href]');for(var j=0;j<as.length;j++){var h=as[j].href,m=h.match(/\\/page\\/(\\d+)\\/?(?:\\?.*)?$/);if(m)max=Math.max(max,parseInt(m[1],10)||1);}"+
+        "var title=document.title||'',body=document.body?(document.body.innerText||'').slice(0,4000):'',challenge=/anubis|cloudflare|cdn-cgi\\/challenge|challenge-platform|captcha|checking your browser|just a moment|провер(ка|ьте).*человек|подтвердите.*человек/i.test(location.href+' '+title+' '+body)||!!document.querySelector('#challenge-form,.cf-challenge,#anubis_challenge,[data-anubis]');"+
+        "return JSON.stringify({cards:cards,max:max,challenge:challenge,title:title});})()";
     }
     void handleParsed(String value){
         try{
             String raw=value;
-            if(raw.startsWith("\"") && raw.endsWith("\"")) raw=(String)new JSONTokener(raw).nextValue();
+            if(raw.startsWith("\\\"") && raw.endsWith("\\\"")) raw=(String)new JSONTokener(raw).nextValue();
             JSONObject r=new JSONObject(raw); int max=Math.max(1,r.optInt("max",1)); JSONArray cards=r.optJSONArray("cards");
+            if(r.optBoolean("challenge",false)){
+                batchNotice="Обнаружена проверка защиты сайта ("+r.optString("title","")+
+                    "). Запросы остановлены. Пройди проверку в браузере и повтори позже.";
+                pendingPages.clear();finishBatch();return;
+            }
             if(pendingPage==-1 && pendingChosen==0 && pendingUrls.isEmpty()){
-                // Trust pagination actually found in the loaded page. A fabricated
-                // fallback (thousands of pages) can trap the app in an endless scan
-                // when the mirror changes its pagination markup or shows a challenge.
+                if(cards==null||cards.length()==0){
+                    batchNotice="Сайт не вернул карточки каталога. Запросы остановлены, чтобы не нагружать сервер.";
+                    pendingPages.clear();finishBatch();return;
+                }
                 pendingMax=Math.max(1,Math.min(max,10000));
-                int wanted=Math.min(pendingTotal,pendingMax);
+                maxPageChecks=Math.min(pendingMax,Math.max(pendingTotal,Math.min(24,pendingTotal*3)));
                 ArrayList<Integer> all=new ArrayList<>(); for(int p=1;p<=pendingMax;p++)all.add(p);
                 Collections.shuffle(all);
-                for(int i=0;i<wanted;i++)pendingPages.add(all.get(i));
+                if(pendingTotal==1){
+                    for(int p:all){if(p!=1){pendingPages.add(p);if(pendingPages.size()>=maxPageChecks-1)break;}}
+                    pendingPage=1;attemptedPages.add(1);processBatchPage(cards);return;
+                }
+                for(int i=0;i<Math.min(maxPageChecks,all.size());i++)pendingPages.add(all.get(i));
                 loadNextBatchPage(); return;
             }
             processBatchPage(cards);
-        }catch(Exception e){setStatus("Ошибка чтения страницы: "+e.getMessage());}
+        }catch(Exception e){
+            setStatus("Ошибка чтения страницы: "+e.getMessage());
+            randomInProgress=false;batchToken++;pendingPages.clear();
+        }
     }
     void loadNextBatchPage(){
         if(pendingPages.isEmpty() || pendingChosen>=pendingTotal){finishBatch();return;}
         pendingPage=pendingPages.remove(0); attemptedPages.add(pendingPage);
-        setStatus("Выбираю карточку "+(pendingChosen+1)+" из "+pendingTotal+" — страница "+pendingPage+"…");
-        web.loadUrl(pageUrl(pendingPage));
+        final int page=pendingPage;final long token=batchToken;
+        setStatus("Выбираю карточку "+(pendingChosen+1)+" из "+pendingTotal+" — страница "+page+"…");
+        long elapsed=android.os.SystemClock.elapsedRealtime()-lastPageStarted;
+        long delay=Math.max(0L,MIN_PAGE_INTERVAL_MS-elapsed);
+        new android.os.Handler(getMainLooper()).postDelayed(()->{
+            if(!randomInProgress||token!=batchToken||pendingPage!=page)return;
+            lastPageStarted=android.os.SystemClock.elapsedRealtime();
+            web.loadUrl(pageUrl(page));
+        },delay);
     }
     void processBatchPage(JSONArray cards) throws Exception {
         HashSet<String> used=usedUrls(); used.addAll(pendingBatchUrls);
@@ -220,29 +249,32 @@ public class MainActivity extends Activity {
             String u=pick.getString("url"); pendingBatchUrls.add(u); pendingUrls.add(u);
             pendingTitles.put(u,pick.optString("title",u)); pendingChosen++;
         }
-        if(pendingChosen<pendingTotal && pendingPages.isEmpty()){
-            ArrayList<Integer> extra=new ArrayList<>();
-            for(int p=1;p<=pendingMax;p++)if(!attemptedPages.contains(p))extra.add(p);
-            Collections.shuffle(extra);
-            for(int p:extra){pendingPages.add(p);if(pendingPages.size()>=pendingTotal-pendingChosen)break;}
-        }
         if(!pendingPages.isEmpty() && pendingChosen<pendingTotal){loadNextBatchPage();return;}
         finishBatch();
     }
     void finishBatch(){
+        int requested=pendingTotal;
         try{
-            if(pendingUrls.isEmpty()){setStatus("Не удалось найти новые карточки на разных страницах. Попробуй снова.");return;}
+            if(pendingUrls.isEmpty()){
+                setStatus(batchNotice.isEmpty()?"Не удалось найти новые карточки на проверенных страницах. Попробуй позже.":batchNotice);
+                return;
+            }
             for(String u:pendingUrls){
                 JSONObject record=new JSONObject();record.put("url",u);record.put("title",pendingTitles.containsKey(u)?pendingTitles.get(u):u);
                 record.put("date",System.currentTimeMillis());record.put("domain",origin());library.put(record);
             }
             saveLibrary();
-            int mode=prefs.getInt("openMode",0);
-            openBatch(new ArrayList<>(pendingUrls),mode);
-            setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц и сохранено в базе. Всего записей: "+library.length());
+            int mode=prefs.getInt("openMode",0);openBatch(new ArrayList<>(pendingUrls),mode);
+            String message="Выбрано "+pendingUrls.size()+" карточек с разных страниц и сохранено в базе. Всего записей: "+library.length();
+            if(pendingUrls.size()<requested)message+=" Проверено не более "+maxPageChecks+" страниц за один запуск.";
+            if(!batchNotice.isEmpty())message+=" "+batchNotice;
+            setStatus(message);
             String ghToken=prefs.getString("ghToken","");if(!ghToken.isEmpty())syncGithub(ghToken,prefs.getString("ghGist",""));
         }catch(Exception e){setStatus("Ошибка сохранения выбранных карточек: "+e.getMessage());}
-        finally{pendingPage=-1;pendingTotal=1;pendingChosen=0;pendingPages.clear();pendingBatchUrls.clear();pendingUrls.clear();attemptedPages.clear();pendingTitles.clear();}
+        finally{
+            randomInProgress=false;batchToken++;batchNotice="";pendingPage=-1;pendingTotal=1;pendingChosen=0;
+            pendingPages.clear();pendingBatchUrls.clear();pendingUrls.clear();attemptedPages.clear();pendingTitles.clear();
+        }
     }
     void pickFrom(JSONArray cards){
         try{
