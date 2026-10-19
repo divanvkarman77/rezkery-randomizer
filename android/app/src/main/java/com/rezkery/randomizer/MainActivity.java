@@ -19,6 +19,9 @@ import java.util.*;
 
 public class MainActivity extends Activity {
     EditText domain, year, count;
+    AutoCompleteTextView yearDropdown;
+    Button yearMinus, yearPlus, hdrezkaSyncButton;
+    TextView title;
     Spinner type, openMode;
     Button simpleModeButton, advancedModeButton;
     boolean simpleMode = true;
@@ -45,7 +48,9 @@ public class MainActivity extends Activity {
         super.onCreate(b); setContentView(R.layout.activity_main);
         prefs=getSharedPreferences("rzk",0);
         domain=findViewById(R.id.domain); year=findViewById(R.id.year); count=findViewById(R.id.count); type=findViewById(R.id.type);
-        status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); web=findViewById(R.id.web);
+        status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); title=findViewById(R.id.title); web=findViewById(R.id.web);
+        yearDropdown=findViewById(R.id.year); yearMinus=findViewById(R.id.yearMinus); yearPlus=findViewById(R.id.yearPlus);
+        hdrezkaSyncButton=findViewById(R.id.hdrezkaSync);
         openMode=findViewById(R.id.openMode);
         simpleModeButton=findViewById(R.id.simpleMode); advancedModeButton=findViewById(R.id.advancedMode);
         simpleMode=prefs.getBoolean("simpleMode",true);
@@ -54,13 +59,22 @@ public class MainActivity extends Activity {
         importJsonButton=findViewById(R.id.importJson); exportHtmlButton=findViewById(R.id.exportHtml);
         importHtmlButton=findViewById(R.id.importHtml); driveExportButton=findViewById(R.id.driveExport);
         driveImportButton=findViewById(R.id.driveImport); githubButton=findViewById(R.id.githubSync);
-        domain.setText(prefs.getString("domain","https://rezkery.com"));
+        domain.setText(prefs.getString("domainAdvanced",prefs.getString("domain","https://rezkery.com")));
+        year.setText(prefs.getString("yearAdvanced","")); count.setText(prefs.getString("countAdvanced",prefs.getString("pickCount","1")));
         lightTheme=prefs.getBoolean("lightTheme",false);
         type.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,types) {{
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         }});
         openMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {{ setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }});
-        openMode.setSelection(prefs.getInt("openMode",0));
+        openMode.setSelection(Math.max(0,Math.min(prefs.getInt("openMode",0),openModes.length-1)));
+        type.setSelection(Math.max(0,Math.min(prefs.getInt("categoryAdvanced",0),types.length-1)));
+        ArrayList<String> yearOptions=new ArrayList<>(); for(int y=java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);y>=1900;y--)yearOptions.add(String.valueOf(y));
+        ArrayAdapter<String> yearAdapter=new ArrayAdapter<String>(this,android.R.layout.simple_dropdown_item_1line,yearOptions);
+        yearDropdown.setAdapter(yearAdapter); yearDropdown.setThreshold(0);
+        yearDropdown.setOnFocusChangeListener((v,hasFocus)->{if(hasFocus)yearDropdown.showDropDown();});
+        yearMinus.setOnClickListener(v->adjustYear(-1)); yearPlus.setOnClickListener(v->adjustYear(1));
+        domain.addTextChangedListener(simpleWatcher("domainAdvanced")); year.addTextChangedListener(simpleWatcher("yearAdvanced")); count.addTextChangedListener(simpleWatcher("countAdvanced"));
+        type.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("categoryAdvanced",pos).apply();}public void onNothingSelected(android.widget.AdapterView<?> p){}});
         openMode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
             public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("openMode",pos).apply();}
             public void onNothingSelected(android.widget.AdapterView<?> p){}
@@ -82,6 +96,7 @@ public class MainActivity extends Activity {
         driveExportButton.setOnClickListener(v->chooseExport(PICK_EXPORT_JSON,"rezkery-drive-backup.json","application/json"));
         driveImportButton.setOnClickListener(v->chooseImport("application/json"));
         githubButton.setOnClickListener(v->githubDialog());
+        hdrezkaSyncButton.setOnClickListener(v->hdrezkaSyncDialog());
         applyModeVisibility();
         setStatus("База сохранена локально. Повторно выбранные фильмы пропускаются.");
     }
@@ -94,7 +109,7 @@ public class MainActivity extends Activity {
         int muted=lightTheme?Color.rgb(76,86,102):Color.rgb(174,181,193);
         LinearLayout root=findViewById(R.id.root);
         root.setBackgroundColor(bg);
-        subtitle.setTextColor(muted); status.setTextColor(muted);
+        title.setTextColor(fg); subtitle.setTextColor(muted); status.setTextColor(muted);
         domain.setTextColor(fg); year.setTextColor(fg);
         domain.setHintTextColor(muted); year.setHintTextColor(muted);
         int[][] states=new int[][]{new int[]{android.R.attr.state_enabled},new int[]{}};
@@ -103,7 +118,7 @@ public class MainActivity extends Activity {
         openMode.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
         openMode.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
         type.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
-        for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton,simpleModeButton,advancedModeButton}){
+        for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton,hdrezkaSyncButton,yearMinus,yearPlus,simpleModeButton,advancedModeButton}){
             b.setTextColor(lightTheme?Color.WHITE:Color.rgb(20,22,26));
             b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(42,91,170):Color.rgb(224,228,234)));
         }
@@ -135,22 +150,22 @@ public class MainActivity extends Activity {
     static class ViewFlags { static final int LIGHT_STATUS=0x00002000; }
 
     String origin(){
-        String d=domain.getText().toString().trim();
+        String d=simpleMode?"https://rezkery.com":domain.getText().toString().trim();
         if(!d.matches("(?i)^https?://.*")) d="https://"+d;
         return d.replaceAll("/+$","");
     }
     String pageUrl(int page){
-        int t=type.getSelectedItemPosition(); String y=year.getText().toString().trim(); String g=genres[t];
+        int t=simpleMode?0:type.getSelectedItemPosition(); String y=simpleMode?"":year.getText().toString().trim(); String g=genres[t];
         String path;
         if(!y.isEmpty()) path=origin()+"/year/"+y+(page>1?"/page/"+page+"/":"/");
         else path=origin()+(page>1?"/page/"+page+"/":"/");
         return path+(g.isEmpty()?"":"?filter=last&genre="+g);
     }
     void startRandom(){
-        String y=year.getText().toString().trim();
+        String y=simpleMode?"":year.getText().toString().trim();
         if(!y.isEmpty()&&!y.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
-        prefs.edit().putString("domain",origin()).putString("pickCount",count.getText().toString().trim()).apply();
-        try { pendingTotal=Math.max(1,Math.min(30,Integer.parseInt(count.getText().toString().trim()))); } catch(Exception e){pendingTotal=1;}
+        if(!simpleMode)prefs.edit().putString("domainAdvanced",origin()).putString("yearAdvanced",y).putString("countAdvanced",count.getText().toString().trim()).putInt("categoryAdvanced",type.getSelectedItemPosition()).apply();
+        try { pendingTotal=simpleMode?1:Math.max(1,Math.min(30,Integer.parseInt(count.getText().toString().trim()))); } catch(Exception e){pendingTotal=1;}
         pendingChosen=0; pendingUrls.clear(); pendingBatchUrls.clear(); pendingPages.clear(); attemptedPages.clear(); pendingTitles.clear(); pendingPage=-1;
         setStatus("Определяю страницы каталога…"); web.loadUrl(pageUrl(1));
     }
@@ -214,17 +229,8 @@ public class MainActivity extends Activity {
             }
             saveLibrary();
             int mode=prefs.getInt("openMode",0);
-            if(mode==1){openFilm(pendingUrls.get(0));setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц. В HDRezka App открыта первая; остальные сохранены в базе. Всего записей: "+library.length());}
-            else {
-                // Launch ACTION_VIEW intents in separate UI ticks so Android's browser
-                // has time to process every selected card instead of dropping launches.
-                final ArrayList<String> toOpen=new ArrayList<>(pendingUrls);
-                for(int i=0;i<toOpen.size();i++){
-                    final String u=toOpen.get(i);
-                    new android.os.Handler(getMainLooper()).postDelayed(()->openFilm(u),i*650L);
-                }
-                setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц и сохранено в базе. Всего записей: "+library.length());
-            }
+            openBatch(new ArrayList<>(pendingUrls),mode);
+            setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц и сохранено в базе. Всего записей: "+library.length());
             String ghToken=prefs.getString("ghToken","");if(!ghToken.isEmpty())syncGithub(ghToken,prefs.getString("ghGist",""));
         }catch(Exception e){setStatus("Ошибка сохранения выбранных карточек: "+e.getMessage());}
         finally{pendingPage=-1;pendingTotal=1;pendingChosen=0;pendingPages.clear();pendingBatchUrls.clear();pendingUrls.clear();attemptedPages.clear();pendingTitles.clear();}
@@ -248,13 +254,8 @@ public class MainActivity extends Activity {
             }
             saveLibrary();
             int mode=prefs.getInt("openMode",0);
-            if(mode==1) {
-                openFilm(urls.get(0));
-                setStatus("Выбрано "+n+" карточек. В HDRezka App открыта первая; остальные сохранены в базе. Всего записей: "+library.length());
-            } else {
-                for(String u:urls) openFilm(u);
-                setStatus("Выбрано и сохранено карточек: "+n+". Всего записей: "+library.length());
-            }
+            openBatch(urls,mode);
+            setStatus("Выбрано и сохранено карточек: "+n+". Всего записей: "+library.length());
             String ghToken=prefs.getString("ghToken","");
             if(!ghToken.isEmpty()) syncGithub(ghToken,prefs.getString("ghGist",""));
         }catch(Exception e){setStatus("Ошибка: "+e.getMessage());}
@@ -262,14 +263,14 @@ public class MainActivity extends Activity {
 
     void applyModeVisibility(){
         int advanced=simpleMode?View.GONE:View.VISIBLE;
-        int[] ids={R.id.domainLabel,R.id.domain,R.id.categoryLabel,R.id.type,R.id.yearLabel,R.id.year,R.id.countLabel,R.id.count,
+        int[] ids={R.id.domainLabel,R.id.domain,R.id.categoryLabel,R.id.type,R.id.yearLabel,R.id.year,R.id.yearMinus,R.id.yearPlus,R.id.countLabel,R.id.count,
             R.id.theme,R.id.database,R.id.backupTitle,R.id.exportJson,R.id.importJson,R.id.exportHtml,R.id.importHtml,
-            R.id.driveTitle,R.id.driveDescription,R.id.driveExport,R.id.driveImport,R.id.githubTitle,R.id.githubDescription,R.id.githubSync};
+            R.id.driveTitle,R.id.driveDescription,R.id.driveExport,R.id.driveImport,R.id.githubTitle,R.id.githubDescription,R.id.githubSync,R.id.hdrezkaSync};
         for(int id:ids){android.view.View v=findViewById(id);if(v!=null)v.setVisibility(advanced);}
         simpleModeButton.setVisibility(simpleMode?View.GONE:View.VISIBLE);
         advancedModeButton.setVisibility(simpleMode?View.VISIBLE:View.GONE);
         random.setText(simpleMode?"🎲 ВЫБРАТЬ СЛУЧАЙНУЮ КАРТОЧКУ":"ОТКРЫТЬ СЛУЧАЙНЫЕ КАРТОЧКИ");
-        count.setText(prefs.getString("pickCount","1"));
+        if(!simpleMode){domain.setText(prefs.getString("domainAdvanced",prefs.getString("domain","https://rezkery.com")));year.setText(prefs.getString("yearAdvanced",""));count.setText(prefs.getString("countAdvanced",prefs.getString("pickCount","1")));type.setSelection(Math.max(0,Math.min(prefs.getInt("categoryAdvanced",0),types.length-1)));}
     }
 
     String hdrezkaUrl(String original){
@@ -281,18 +282,44 @@ public class MainActivity extends Activity {
     }
     void openFilm(String original){
         int mode=prefs.getInt("openMode",0);
+        if(mode==2){
+            new AlertDialog.Builder(this).setTitle("Где открыть фильм?")
+                .setItems(new String[]{"HDRezka App","Браузер"},(d,which)->openFilmWithMode(original,which==0?1:0)).show();
+        }else openFilmWithMode(original,mode);
+    }
+    void openFilmWithMode(String original,int mode){
         String target=mode==1?hdrezkaUrl(original):original;
-        Intent view=new Intent(Intent.ACTION_VIEW,Uri.parse(target));
-        view.addCategory(Intent.CATEGORY_BROWSABLE);
+        Intent view=new Intent(Intent.ACTION_VIEW,Uri.parse(target)); view.addCategory(Intent.CATEGORY_BROWSABLE);
         try{
-            if(mode==2) startActivity(Intent.createChooser(view,"Где открыть фильм?"));
-            else startActivity(view);
+            if(mode==1){view.setPackage("com.hdrezka");}
+            startActivity(view);
         }catch(Exception e){
-            if(mode==1){
-                try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(original)));setStatus("HDRezka App не перехватила ссылку; открыл исходную ссылку.");}
-                catch(Exception ex){setStatus("Не удалось открыть ссылку: "+ex.getMessage());}
-            }else setStatus("Не найдено приложение для открытия ссылки: "+e.getMessage());
+            try{Intent fallback=new Intent(Intent.ACTION_VIEW,Uri.parse(original));fallback.addCategory(Intent.CATEGORY_BROWSABLE);startActivity(fallback);
+                if(mode==1)setStatus("HDRezka App не найдена; ссылка открыта в браузере.");
+            }catch(Exception ex){setStatus("Не удалось открыть ссылку: "+ex.getMessage());}
         }
+    }
+    void openBatch(ArrayList<String> urls,int mode){
+        if(urls.isEmpty())return;
+        if(mode==2){
+            new AlertDialog.Builder(this).setTitle("Где открыть карточки?")
+                .setItems(new String[]{"HDRezka App","Браузер"},(d,which)->openBatchSelected(urls,which==0?1:0)).show();
+        }else openBatchSelected(urls,mode);
+    }
+    void openBatchSelected(ArrayList<String> urls,int mode){
+        if(mode==1){openFilmWithMode(urls.get(0),1);return;}
+        for(int i=0;i<urls.size();i++){final String u=urls.get(i);new android.os.Handler(getMainLooper()).postDelayed(()->openFilmWithMode(u,0),i*650L);}
+    }
+    void adjustYear(int delta){
+        String raw=year.getText().toString().trim();int current;
+        try{current=Integer.parseInt(raw);}catch(Exception e){current=java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);}
+        int next=Math.max(1900,Math.min(java.util.Calendar.getInstance().get(java.util.Calendar.YEAR),current+delta));
+        year.setText(String.valueOf(next));year.setSelection(year.length());
+    }
+    android.text.TextWatcher simpleWatcher(String key){
+        return new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}
+            public void onTextChanged(CharSequence s,int start,int before,int count){if(prefs!=null)prefs.edit().putString(key,s.toString()).apply();}
+            public void afterTextChanged(android.text.Editable e){}};
     }
 
     HashSet<String> usedUrls(){
