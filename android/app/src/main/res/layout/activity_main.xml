@@ -110,8 +110,10 @@
                 android:text="СИНХРОНИЗИРОВАТЬ С GITHUB" android:layout_marginTop="4dp" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="ЗАКЛАДКИ HDREZKA" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
+            <CheckBox android:id="@+id/autoSyncBookmarks" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Автоматически импортировать папку RANDOM при запуске (не чаще раза в 6 часов)" android:textColor="#AEB5C1" />
             <TextView android:id="@+id/hdrezkaDescription" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="Войди в аккаунт HDRezka во встроенном окне и добавь выбранные карточки в папку RANDOM." android:textColor="#AEB5C1" android:textSize="13sp" />
+                android:text="Синхронизация загружает папку RANDOM в базу приложения и добавляет в неё отсутствующие карточки. JSON/HTML экспорт сохраняет резервную копию на устройстве." android:textColor="#AEB5C1" android:textSize="13sp" />
             <Button android:id="@+id/hdrezkaSync" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="СИНХРОНИЗИРОВАТЬ ЗАКЛАДКИ HDREZKA" android:layout_marginTop="4dp" />
         </LinearLayout>
