@@ -20,8 +20,14 @@ import java.util.*;
 public class MainActivity extends Activity {
     EditText domain, year, count;
     AutoCompleteTextView yearDropdown;
-    Button yearMinus, yearPlus, hdrezkaSyncButton;
+    Button yearMinus, yearPlus, hdrezkaSyncButton, settingsButton;
     TextView title;
+    LinearLayout settingsPanel;
+    Spinner requestInterval, protectionCooldown;
+    String[] intervalOptions={"1 секунда","2 секунды","3 секунды","5 секунд"};
+    int[] intervalSeconds={1,2,3,5};
+    String[] cooldownOptions={"1 минута","3 минуты","5 минут","10 минут","15 минут","30 минут"};
+    int[] cooldownMinutes={1,3,5,10,15,30};
     Spinner type, openMode;
     Button simpleModeButton, advancedModeButton;
     boolean simpleMode = true;
@@ -39,7 +45,7 @@ public class MainActivity extends Activity {
     long batchToken=0, lastPageStarted=0;
     boolean randomInProgress=false;
     String batchNotice="";
-    static final long MIN_PAGE_INTERVAL_MS=1800L;
+
     ArrayList<Integer> pendingPages=new ArrayList<>();
     ArrayList<String> pendingUrls=new ArrayList<>();
     HashSet<String> pendingBatchUrls=new HashSet<>();
@@ -55,7 +61,9 @@ public class MainActivity extends Activity {
         domain=findViewById(R.id.domain); year=findViewById(R.id.year); count=findViewById(R.id.count); type=findViewById(R.id.type);
         status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); title=findViewById(R.id.title); web=findViewById(R.id.web);
         yearDropdown=findViewById(R.id.year); yearMinus=findViewById(R.id.yearMinus); yearPlus=findViewById(R.id.yearPlus);
-        hdrezkaSyncButton=findViewById(R.id.hdrezkaSync);
+        hdrezkaSyncButton=findViewById(R.id.hdrezkaSync); settingsButton=findViewById(R.id.settings);
+        settingsPanel=findViewById(R.id.settingsPanel); requestInterval=findViewById(R.id.requestInterval); protectionCooldown=findViewById(R.id.protectionCooldown);
+        setupTimeoutControls();
         openMode=findViewById(R.id.openMode);
         simpleModeButton=findViewById(R.id.simpleMode); advancedModeButton=findViewById(R.id.advancedMode);
         simpleMode=prefs.getBoolean("simpleMode",true);
@@ -102,6 +110,7 @@ public class MainActivity extends Activity {
         driveImportButton.setOnClickListener(v->chooseImport("application/json"));
         githubButton.setOnClickListener(v->githubDialog());
         hdrezkaSyncButton.setOnClickListener(v->hdrezkaSyncDialog());
+        settingsButton.setOnClickListener(v->openSettingsWindow());
         applyModeVisibility();
         setStatus("База сохранена локально. Повторно выбранные фильмы пропускаются.");
     }
@@ -109,6 +118,7 @@ public class MainActivity extends Activity {
     void applyTheme(){
         int selectedType=type.getSelectedItemPosition();
         int selectedOpenMode=openMode.getSelectedItemPosition();
+        int selectedInterval=requestInterval.getSelectedItemPosition(), selectedCooldown=protectionCooldown.getSelectedItemPosition();
         int bg=lightTheme?Color.rgb(247,249,252):Color.rgb(17,19,23);
         int fg=lightTheme?Color.rgb(24,29,38):Color.WHITE;
         int muted=lightTheme?Color.rgb(76,86,102):Color.rgb(174,181,193);
@@ -123,7 +133,7 @@ public class MainActivity extends Activity {
         openMode.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
         openMode.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
         type.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
-        for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton,hdrezkaSyncButton,yearMinus,yearPlus,simpleModeButton,advancedModeButton}){
+        for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton,hdrezkaSyncButton,yearMinus,yearPlus,settingsButton,simpleModeButton,advancedModeButton}){
             b.setTextColor(lightTheme?Color.WHITE:Color.rgb(20,22,26));
             b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(42,91,170):Color.rgb(224,228,234)));
         }
@@ -151,6 +161,8 @@ public class MainActivity extends Activity {
             }
         });
         openMode.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));
+        styleChoiceSpinner(requestInterval,intervalOptions,selectedInterval,fg,lightTheme);
+        styleChoiceSpinner(protectionCooldown,cooldownOptions,selectedCooldown,fg,lightTheme);
     }
     void tintLabels(android.view.ViewGroup group,int color){
         for(int i=0;i<group.getChildCount();i++){
@@ -210,9 +222,10 @@ public class MainActivity extends Activity {
             if(raw.startsWith("\"") && raw.endsWith("\"")) raw=(String)new JSONTokener(raw).nextValue();
             JSONObject r=new JSONObject(raw); int max=Math.max(1,r.optInt("max",1)); JSONArray cards=r.optJSONArray("cards");
             if(r.optBoolean("challenge",false)){
+                long cooldown=Math.max(1,prefs.getInt("protectionCooldownMinutes",15));
                 batchNotice="Обнаружена проверка защиты сайта ("+r.optString("title","")+
-                    "). Запросы остановлены. Повторный запрос будет доступен через 15 минут.";
-                prefs.edit().putLong("protectionCooldownUntil",System.currentTimeMillis()+15L*60L*1000L).apply();
+                    "). Запросы остановлены. Повторный запрос будет доступен через "+cooldown+" мин.";
+                prefs.edit().putLong("protectionCooldownUntil",System.currentTimeMillis()+cooldown*60L*1000L).apply();
                 pendingPages.clear();finishBatch();return;
             }
             if(pendingPage==-1 && pendingChosen==0 && pendingUrls.isEmpty()){
@@ -243,7 +256,8 @@ public class MainActivity extends Activity {
         final int page=pendingPage;final long token=batchToken;
         setStatus("Выбираю карточку "+(pendingChosen+1)+" из "+pendingTotal+" — страница "+page+"…");
         long elapsed=android.os.SystemClock.elapsedRealtime()-lastPageStarted;
-        long delay=Math.max(0L,MIN_PAGE_INTERVAL_MS-elapsed);
+        long intervalMs=Math.max(1000L,prefs.getInt("requestIntervalSeconds",2)*1000L);
+        long delay=Math.max(0L,intervalMs-elapsed);
         new android.os.Handler(getMainLooper()).postDelayed(()->{
             if(!randomInProgress||token!=batchToken||pendingPage!=page)return;
             lastPageStarted=android.os.SystemClock.elapsedRealtime();
@@ -316,15 +330,60 @@ public class MainActivity extends Activity {
     }
 
     void applyModeVisibility(){
-        int advanced=simpleMode?View.GONE:View.VISIBLE;
-        int[] ids={R.id.domainLabel,R.id.domain,R.id.categoryLabel,R.id.type,R.id.yearLabel,R.id.year,R.id.yearMinus,R.id.yearPlus,R.id.countLabel,R.id.count,
-            R.id.theme,R.id.database,R.id.backupTitle,R.id.exportJson,R.id.importJson,R.id.exportHtml,R.id.importHtml,
-            R.id.driveTitle,R.id.driveDescription,R.id.driveExport,R.id.driveImport,R.id.githubTitle,R.id.githubDescription,R.id.githubSync,R.id.hdrezkaDescription,R.id.hdrezkaSync};
-        for(int id:ids){android.view.View v=findViewById(id);if(v!=null)v.setVisibility(advanced);}
         simpleModeButton.setVisibility(simpleMode?View.GONE:View.VISIBLE);
         advancedModeButton.setVisibility(simpleMode?View.VISIBLE:View.GONE);
         random.setText(simpleMode?"🎲 ВЫБРАТЬ СЛУЧАЙНУЮ КАРТОЧКУ":"ОТКРЫТЬ СЛУЧАЙНЫЕ КАРТОЧКИ");
-        if(!simpleMode){domain.setText(prefs.getString("domainAdvanced",prefs.getString("domain","https://rezkery.com")));year.setText(prefs.getString("yearAdvanced",""));count.setText(prefs.getString("countAdvanced",prefs.getString("pickCount","1")));type.setSelection(Math.max(0,Math.min(prefs.getInt("categoryAdvanced",0),types.length-1)));}
+        if(!simpleMode){
+            domain.setText(prefs.getString("domainAdvanced",prefs.getString("domain","https://rezkery.com")));
+            year.setText(prefs.getString("yearAdvanced",""));
+            count.setText(prefs.getString("countAdvanced",prefs.getString("pickCount","1")));
+            type.setSelection(Math.max(0,Math.min(prefs.getInt("categoryAdvanced",0),types.length-1)));
+        }
+    }
+    void setupTimeoutControls(){
+        styleChoiceSpinner(requestInterval,intervalOptions,indexOf(intervalSeconds,prefs.getInt("requestIntervalSeconds",2)),Color.BLACK,true);
+        styleChoiceSpinner(protectionCooldown,cooldownOptions,indexOf(cooldownMinutes,prefs.getInt("protectionCooldownMinutes",15)),Color.BLACK,true);
+        requestInterval.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("requestIntervalSeconds",intervalSeconds[Math.max(0,Math.min(pos,intervalSeconds.length-1))]).apply();}
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+        });
+        protectionCooldown.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("protectionCooldownMinutes",cooldownMinutes[Math.max(0,Math.min(pos,cooldownMinutes.length-1))]).apply();}
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+        });
+    }
+    int indexOf(int[] choices,int value){for(int i=0;i<choices.length;i++)if(choices[i]==value)return i;return 0;}
+    void styleChoiceSpinner(Spinner spinner,String[] values,int selected,int foreground,boolean light){
+        spinner.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(light?Color.WHITE:Color.rgb(38,42,50)));
+        spinner.setBackgroundTintList(android.content.res.ColorStateList.valueOf(light?Color.rgb(70,80,96):Color.rgb(190,198,210)));
+        spinner.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,values){
+            {setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);}
+            @Override public android.view.View getView(int position,android.view.View convert,android.view.ViewGroup parent){
+                TextView tv=(TextView)super.getView(position,convert,parent);tv.setTextColor(foreground);tv.setPadding(12,8,12,8);return tv;
+            }
+            @Override public android.view.View getDropDownView(int position,android.view.View convert,android.view.ViewGroup parent){
+                TextView tv=(TextView)super.getDropDownView(position,convert,parent);tv.setTextColor(foreground);tv.setBackgroundColor(light?Color.WHITE:Color.rgb(38,42,50));tv.setPadding(18,18,18,18);return tv;
+            }
+        });
+        spinner.setSelection(Math.max(0,Math.min(selected,values.length-1)));
+    }
+    void openSettingsWindow(){
+        if(settingsPanel.getParent() instanceof android.view.ViewGroup)return;
+        LinearLayout root=findViewById(R.id.root);
+        android.view.ViewGroup parent=(android.view.ViewGroup)settingsPanel.getParent();
+        int childIndex=parent.indexOfChild(settingsPanel);
+        android.view.ViewGroup.LayoutParams layoutParams=settingsPanel.getLayoutParams();
+        parent.removeView(settingsPanel);settingsPanel.setVisibility(View.VISIBLE);
+        ScrollView content=new ScrollView(this);content.setFillViewport(false);
+        int pad=(int)(20*getResources().getDisplayMetrics().density);content.setPadding(pad,0,pad,0);
+        content.addView(settingsPanel,new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT,ScrollView.LayoutParams.WRAP_CONTENT));
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Настройки").setView(content).setPositiveButton("Готово",null).create();
+        dialog.setOnDismissListener(d->{
+            if(settingsPanel.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)settingsPanel.getParent()).removeView(settingsPanel);
+            settingsPanel.setVisibility(View.GONE);
+            root.addView(settingsPanel,Math.min(childIndex,root.getChildCount()),layoutParams);
+        });
+        dialog.show();dialog.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels*0.94),Math.max(500,getResources().getDisplayMetrics().heightPixels*3/4));
     }
 
     String hdrezkaUrl(String original){
