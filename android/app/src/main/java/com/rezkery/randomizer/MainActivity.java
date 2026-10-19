@@ -166,6 +166,7 @@ public class MainActivity extends Activity {
             JSONObject r=new JSONObject(raw); int max=Math.max(1,r.optInt("max",1)); JSONArray cards=r.optJSONArray("cards");
             if(pendingPage==-1 && pendingChosen==0 && pendingUrls.isEmpty()){
                 pendingMax=max;
+                if(pendingMax<2){int t=type.getSelectedItemPosition();int[] fallback={2530,1731,520,173,107};pendingMax=fallback[Math.max(0,Math.min(t,fallback.length-1))];}
                 int wanted=Math.min(pendingTotal,pendingMax);
                 ArrayList<Integer> all=new ArrayList<>(); for(int p=1;p<=pendingMax;p++)all.add(p);
                 Collections.shuffle(all);
