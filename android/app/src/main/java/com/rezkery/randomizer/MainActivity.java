@@ -108,7 +108,7 @@ public class MainActivity extends Activity {
         int fg=lightTheme?Color.rgb(24,29,38):Color.WHITE;
         int muted=lightTheme?Color.rgb(76,86,102):Color.rgb(174,181,193);
         LinearLayout root=findViewById(R.id.root);
-        root.setBackgroundColor(bg);
+        root.setBackgroundColor(bg); tintLabels(root,muted);
         title.setTextColor(fg); subtitle.setTextColor(muted); status.setTextColor(muted);
         domain.setTextColor(fg); year.setTextColor(fg);
         domain.setHintTextColor(muted); year.setHintTextColor(muted);
@@ -146,6 +146,15 @@ public class MainActivity extends Activity {
             }
         });
         openMode.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));
+    }
+    void tintLabels(android.view.ViewGroup group,int color){
+        for(int i=0;i<group.getChildCount();i++){
+            android.view.View child=group.getChildAt(i);
+            if(child instanceof Button)continue;
+            if(child instanceof EditText){((TextView)child).setTextColor(lightTheme?Color.rgb(24,29,38):Color.WHITE);continue;}
+            if(child instanceof TextView)((TextView)child).setTextColor(color);
+            if(child instanceof android.view.ViewGroup)tintLabels((android.view.ViewGroup)child,color);
+        }
     }
     static class ViewFlags { static final int LIGHT_STATUS=0x00002000; }
 
