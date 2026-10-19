@@ -751,7 +751,7 @@ public class MainActivity extends Activity {
             "const wait=ms=>new Promise(r=>setTimeout(r,ms));let lastRequest="+(useCurrentPage?"Date.now()":"0")+";"+
             "const rate=async()=>{if(lastRequest){const left="+Math.max(1000,delayMs)+"-(Date.now()-lastRequest);if(left>0)await wait(left)}lastRequest=Date.now()};"+
             "const get=async u=>{await rate();const r=await fetch(u,{credentials:'include',redirect:'follow'});if(!r.ok)throw new Error('HTTP '+r.status);const t=await r.text();if(/anubis|cloudflare|cdn-cgi\\/challenge|captcha|checking your browser|just a moment|проверте.*человек/i.test(t))throw new Error('HDRezka показала проверку защиты. Запросы остановлены; пройди проверку вручную.');return t};"+
-            "const post=async data=>{await rate();const r=await fetch(new URL('/ajax/favorites/',location.origin),{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(data).toString()});const t=await r.text();let j;try{j=JSON.parse(t)}catch(e){throw new Error('Ответ HDRezka не JSON: проверь вход в аккаунт.')}if(!r.ok||j.success===false)throw new Error(j.message||('Ошибка закладок HTTP '+r.status));return j};"+
+            "const post=async data=>{await rate();const r=await fetch(new URL('/ajax/favorites/',location.origin),{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(data).toString()});const t=await r.text();if(/anubis|cloudflare|cdn-cgi\\/challenge|captcha|checking your browser|just a moment/i.test(t))throw new Error('HDRezka показала проверку защиты. Запросы остановлены; пройди проверку вручную.');let j;try{j=JSON.parse(t)}catch(e){throw new Error('Ответ HDRezka не JSON: проверь вход в аккаунт.')}if(!r.ok||j.success===false)throw new Error(j.message||('Ошибка закладок HTTP '+r.status));return j};"+
             "const catFrom=h=>{const d=new DOMParser().parseFromString(h,'text/html');let id='';d.querySelectorAll('a.b-favorites_content__cats_list_link').forEach(a=>{const n=(a.querySelector('.name')||a).textContent.trim().toUpperCase(),m=(a.getAttribute('href')||'').match(/\\/favorites\\/(\\d+)/);if((n==='RANDOM'||/^RANDOM(?:\\s|$)/.test(n))&&m)id=m[1]});return id};"+
             "const parse=h=>{const d=new DOMParser().parseFromString(h,'text/html'),items=[],seen={};let max=1;d.querySelectorAll('.b-content__inline_item').forEach(n=>{const a=n.querySelector('.b-content__inline_item-link a[href]')||n.querySelector('a[href]');if(!a)return;const u=a.href;if(seen[u])return;seen[u]=1;const l=n.querySelector('.b-content__inline_item-link');const ys=(n.innerText||'').match(/(19|20|21)\\d{2}/g)||[],uy=u.match(/(19|20|21)\\d{2}/g)||[];items.push({url:u,title:(l?l.innerText:a.innerText||'Без названия').trim(),year:uy.length?uy[uy.length-1]:(ys.length?ys[ys.length-1]:''),domain:location.origin})});d.querySelectorAll('a[href]').forEach(a=>{const m=a.href.match(/\\/page\\/(\\d+)\\/?(?:\\?.*)?$/);if(m)max=Math.max(max,parseInt(m[1],10)||1)});return{items:items,max:max}};"+
             "P.phase='Открываю закладки HDRezka';let home="+(useCurrentPage?"document.documentElement.outerHTML":"await get(new URL('/favorites/',location.origin))")+";"+
@@ -781,6 +781,12 @@ public class MainActivity extends Activity {
         });
     }
     void startHdrezkaSync(WebView target,AlertDialog dialog,TextView label,ProgressBar bar,boolean[] active,boolean upload){
+        long cooldownUntil=prefs.getLong("protectionCooldownUntil",0L);
+        if(System.currentTimeMillis()<cooldownUntil){
+            long left=Math.max(1,(cooldownUntil-System.currentTimeMillis()+59999L)/60000L);
+            label.setText("Пауза после проверки защиты — ещё примерно "+left+" мин.");
+            bar.setVisibility(View.GONE);active[0]=false;return;
+        }
         JSONArray movies=new JSONArray();
         if(upload)for(int i=0;i<library.length();i++){
             JSONObject item=library.optJSONObject(i);
@@ -794,7 +800,15 @@ public class MainActivity extends Activity {
             try{
                 Object decoded=new JSONTokener(value==null?"":value).nextValue();
                 JSONObject result=new JSONObject(String.valueOf(decoded));
-                if(!result.optBoolean("ok")){label.setText("Ошибка: "+result.optString("error","не удалось выполнить синхронизацию."));setStatus("HDRezka: "+result.optString("error","ошибка синхронизации."));return;}
+                if(!result.optBoolean("ok")){
+                    String error=result.optString("error","не удалось выполнить синхронизацию.");
+                    if(error.contains("проверку защиты")){
+                        long cooldown=Math.max(1,prefs.getInt("protectionCooldownMinutes",15));
+                        prefs.edit().putLong("protectionCooldownUntil",System.currentTimeMillis()+cooldown*60L*1000L).apply();
+                        error+=" Новые запросы приостановлены на "+cooldown+" мин.";
+                    }
+                    label.setText("Ошибка: "+error);setStatus("HDRezka: "+error);return;
+                }
                 JSONArray incoming=result.optJSONArray("items");int before=library.length();
                 if(incoming!=null&&incoming.length()>0)mergeLibrary(incoming);
                 int imported=Math.max(0,library.length()-before);
@@ -808,6 +822,8 @@ public class MainActivity extends Activity {
         if(!prefs.getBoolean("autoSyncBookmarks",false))return;
         long now=System.currentTimeMillis(),last=prefs.getLong("lastAutoBookmarkSync",0L);
         if(now-last<6L*60L*60L*1000L)return;
+        long cooldownUntil=prefs.getLong("protectionCooldownUntil",0L);
+        if(now<cooldownUntil)return;
         String origin=bookmarkOrigin();
         String cookies=CookieManager.getInstance().getCookie(origin);
         if(cookies==null||cookies.isEmpty())return;
@@ -835,7 +851,14 @@ public class MainActivity extends Activity {
                             if(incoming!=null&&incoming.length()>0)mergeLibrary(incoming);
                             int added=Math.max(0,library.length()-before);
                             setStatus(result.optBoolean("noFolder")?"Автоимпорт: папка RANDOM ещё не создана.":"Автоимпорт RANDOM завершён: добавлено в базу "+added+" новых карточек.");
-                        }else setStatus("Автоимпорт HDRezka остановлен: "+result.optString("error","ошибка чтения закладок."));
+                        }else{
+                            String error=result.optString("error","ошибка чтения закладок.");
+                            if(error.contains("проверку защиты")){
+                                long cooldown=Math.max(1,prefs.getInt("protectionCooldownMinutes",15));
+                                prefs.edit().putLong("protectionCooldownUntil",System.currentTimeMillis()+cooldown*60L*1000L).apply();
+                            }
+                            setStatus("Автоимпорт HDRezka остановлен: "+error);
+                        }
                     }catch(Exception e){setStatus("Автоимпорт HDRezka: "+e.getMessage());}
                     finally{root.removeView(syncWeb);syncWeb.stopLoading();syncWeb.destroy();}
                 });
