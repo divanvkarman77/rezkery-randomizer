@@ -24,6 +24,18 @@
       <div class="hint">Укажите только домен зеркала. Например: <b>rezka.fi</b> или <b>https://rezka.fi</b>. Структура сайта должна быть совместима с Rezkery/HDrezka.</div>
       <div class="settings-actions"><button class="primary" id="settingsSave">Сохранить</button><button class="secondary" id="settingsReset">По умолчанию</button></div>
       <div class="muted" id="settingsStatus"></div>
+      <div class="settings-divider"></div>
+      <strong>Резервная копия и синхронизация</strong>
+      <div class="settings-actions"><button class="secondary" id="settingsExportJson">Экспорт базы</button><label class="file-btn secondary">Импорт базы<input id="settingsImportFile" type="file" accept=".json,.html,text/html,application/json"></label></div>
+      <div class="hint">Для Google Drive экспортируйте JSON и сохраните его в Drive; для восстановления скачайте файл и импортируйте здесь. Автоматическая синхронизация Drive требует настройки OAuth-приложения.</div>
+      <label>GitHub Personal Access Token (scope: gist)<input id="githubToken" type="password" placeholder="GitHub token с разрешением gist" autocomplete="off"></label>
+      <label>GitHub Gist ID<input id="githubGistId" type="text" placeholder="Пусто — создать приватный Gist" autocomplete="off"></label>
+      <div class="settings-actions"><button class="primary" id="githubSyncNow">Синхронизировать с GitHub</button></div>
+      <div class="muted" id="syncStatus"></div>
+      <div class="settings-divider"></div>
+      <strong>Закладки HDRezka</strong>
+      <div class="hint">Синхронизация с папкой RANDOM требует подтверждения API закладок и авторизации HDRezka. Расширение не считывает cookies без отдельного разрешения.</div>
+
     </section>
 
     <nav class="tabs">
