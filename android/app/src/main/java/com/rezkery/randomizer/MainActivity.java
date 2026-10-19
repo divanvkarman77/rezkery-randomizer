@@ -446,7 +446,7 @@ public class MainActivity extends Activity {
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             window.setLayout((int)(getResources().getDisplayMetrics().widthPixels*0.94),Math.max(500,getResources().getDisplayMetrics().heightPixels*3/4));
         }
-        TextView heading=dialog.findViewById(android.R.id.alertTitle);
+        TextView heading=dialog.findViewById(android.R.id.title);
         if(heading!=null)heading.setTextColor(foreground);
         Button done=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         if(done!=null)done.setTextColor(lightTheme?Color.rgb(42,91,170):Color.rgb(144,180,255));
@@ -648,6 +648,7 @@ public class MainActivity extends Activity {
         CookieManager cookieManager=CookieManager.getInstance();cookieManager.setAcceptCookie(true);
         if(android.os.Build.VERSION.SDK_INT>=21)cookieManager.setAcceptThirdPartyCookies(loginWeb,true);
         loginWeb.setWebChromeClient(new WebChromeClient());
+        boolean[] loginPageReady={false};
         loginWeb.setWebViewClient(new WebViewClient(){
             @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){pageStatus.setText("Загрузка страницы HDRezka…");}
             @Override public void onPageFinished(WebView view,String url){
@@ -670,7 +671,7 @@ public class MainActivity extends Activity {
             }
         });
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(box);
-        boolean[] webDestroyed={false},syncRunning={false},loginPageReady={false};
+        boolean[] webDestroyed={false},syncRunning={false};
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Вход и закладки HDRezka").setView(scroll)
             .setNegativeButton("Закрыть",(d,w)->{webDestroyed[0]=true;loginWeb.stopLoading();loginWeb.destroy();})
             .setNeutralButton("Импорт + синхронизация",null).create();
@@ -686,7 +687,7 @@ public class MainActivity extends Activity {
             int surface=lightTheme?Color.WHITE:Color.rgb(28,31,37),fg=lightTheme?Color.rgb(24,29,38):Color.WHITE;
             scroll.setBackgroundColor(surface);box.setBackgroundColor(surface);
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(surface));
-            TextView dialogTitle=dialog.findViewById(android.R.id.alertTitle);if(dialogTitle!=null)dialogTitle.setTextColor(fg);
+            TextView dialogTitle=dialog.findViewById(android.R.id.title);if(dialogTitle!=null)dialogTitle.setTextColor(fg);
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setTextColor(lightTheme?Color.rgb(42,91,170):Color.rgb(144,180,255));
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(lightTheme?Color.rgb(42,91,170):Color.rgb(144,180,255));
             int maxHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.84);
