@@ -304,7 +304,7 @@
   function saveSettings() {
     var input = $('#domainInput');
     var origin = normalizeOrigin(input.value);
-    return storageSet({ rz_settings_v1: { domain: origin } }).then(function () {
+    return storageGet('rz_settings_v1').then(function (existing) { existing = existing || {}; existing.domain = origin; return storageSet({ rz_settings_v1: existing }); }).then(function () {
       BASE_ORIGIN = origin;
       input.value = BASE_ORIGIN;
       currentCatalogPages = Object.create(null);
@@ -499,6 +499,73 @@
     reader.readAsText(file); $('#importFile').value = '';
   }
 
+
+  function loadSyncSettings() {
+    return storageGet('rz_settings_v1').then(function(s) {
+      s = s || {};
+      $('#githubToken').value = s.githubToken || '';
+      $('#githubGistId').value = s.githubGistId || '';
+    });
+  }
+
+  function githubSync() {
+    var token = clean($('#githubToken').value);
+    var gistId = clean($('#githubGistId').value);
+    if (!token) { $('#syncStatus').textContent = 'Вставьте GitHub token с разрешением gist.'; return; }
+    $('#syncStatus').textContent = 'Синхронизирую…';
+    Promise.all([loadDb(), storageGet('rz_settings_v1')]).then(function(values) {
+      var local = values[0], settings = values[1] || {};
+      function api(url, method, body) {
+        return fetch(url, {
+          method: method,
+          headers: { 'Accept': 'application/vnd.github+json', 'Authorization': 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined
+        }).then(function(r) {
+          return r.text().then(function(t) {
+            var data = {}; try { data = t ? JSON.parse(t) : {}; } catch (e) {}
+            if (!r.ok) throw new Error(data.message || ('GitHub API: HTTP ' + r.status));
+            return data;
+          });
+        });
+      }
+      function merge(remote) {
+        var map = Object.create(null);
+        (remote || []).concat(local).forEach(function(m) {
+          if (!m || !m.url) return;
+          var normalized = normalizeMovie(m), key = normalizeUrl(normalized.url);
+          if (!key) return;
+          if (!map[key] || String(normalized.addedAt) > String(map[key].addedAt)) map[key] = normalized;
+        });
+        return Object.keys(map).map(function(k) { return map[k]; });
+      }
+      function contentFrom(gist) {
+        var file = gist && gist.files && (gist.files['rezkery-randomizer.json'] || Object.values(gist.files)[0]);
+        if (!file || !file.content) return [];
+        var parsed = JSON.parse(file.content);
+        return Array.isArray(parsed) ? parsed : (parsed.movies || []);
+      }
+      var getPromise = gistId ? api('https://api.github.com/gists/' + encodeURIComponent(gistId), 'GET') : Promise.resolve(null);
+      return getPromise.then(function(gist) {
+        var merged = merge(gist ? contentFrom(gist) : []);
+        var fileBody = JSON.stringify({format:'rezkery-randomizer',version:3,syncedAt:new Date().toISOString(),movies:merged}, null, 2);
+        var body = {description:'Rezkery Randomizer database sync',public:false,files:{'rezkery-randomizer.json':{content:fileBody}}};
+        return (gist ? api('https://api.github.com/gists/' + encodeURIComponent(gistId), 'PATCH', body) : api('https://api.github.com/gists', 'POST', body))
+          .then(function(saved) {
+            return saveDb(merged).then(function() {
+              settings.githubToken = token; settings.githubGistId = saved.id || gistId; settings.domain = settings.domain || BASE_ORIGIN;
+              return storageSet({rz_settings_v1:settings}).then(function() {
+                $('#githubGistId').value = settings.githubGistId;
+                $('#syncStatus').textContent = 'Готово: объединено карточек ' + merged.length + '. Gist: ' + settings.githubGistId;
+                renderDb();
+              });
+            });
+          });
+      });
+    }).catch(function(e) {
+      $('#syncStatus').textContent = 'Ошибка синхронизации: ' + (e.message || 'неизвестная ошибка');
+    });
+  }
+
   function setupSettingsUi() {
     $('#domainInput').value = BASE_ORIGIN;
     $('#settingsStatus').textContent = 'Текущий домен: ' + BASE_ORIGIN;
@@ -509,7 +576,10 @@
       $('#domainInput').value = DEFAULT_ORIGIN;
     });
     $('#settingsClose').addEventListener('click', function () { $('#settingsPanel').classList.remove('active'); });
-    $('#settingsButton').addEventListener('click', function () { $('#domainInput').value = BASE_ORIGIN; $('#settingsPanel').classList.add('active'); });
+    $('#settingsExportJson').addEventListener('click', exportJson);
+    $('#settingsImportFile').addEventListener('change', function () { importFile(this.files && this.files[0]); });
+    $('#githubSyncNow').addEventListener('click', githubSync);
+    $('#settingsButton').addEventListener('click', function () { $('#domainInput').value = BASE_ORIGIN; $('#settingsPanel').classList.add('active'); loadSyncSettings(); });
   }
 
   function setupYears() {
