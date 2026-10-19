@@ -176,6 +176,11 @@ public class MainActivity extends Activity {
         return path+(g.isEmpty()?"":"?filter=last&genre="+g);
     }
     void startRandom(){
+        long protectionCooldown=prefs.getLong("protectionCooldownUntil",0L);
+        if(System.currentTimeMillis()<protectionCooldown){
+            long minutes=Math.max(1,(protectionCooldown-System.currentTimeMillis()+59999L)/60000L);
+            setStatus("Сайт недавно показал антибот-проверку. Подожди ещё примерно "+minutes+" мин., прежде чем повторить запрос.");return;
+        }
         String y=simpleMode?"":year.getText().toString().trim();
         if(!y.isEmpty()&&!y.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
         if(randomInProgress){setStatus("Подбор уже выполняется. Подожди завершения.");return;}
@@ -199,7 +204,8 @@ public class MainActivity extends Activity {
             JSONObject r=new JSONObject(raw); int max=Math.max(1,r.optInt("max",1)); JSONArray cards=r.optJSONArray("cards");
             if(r.optBoolean("challenge",false)){
                 batchNotice="Обнаружена проверка защиты сайта ("+r.optString("title","")+
-                    "). Запросы остановлены. Пройди проверку в браузере и повтори позже.";
+                    "). Запросы остановлены. Повторный запрос будет доступен через 15 минут.";
+                prefs.edit().putLong("protectionCooldownUntil",System.currentTimeMillis()+15L*60L*1000L).apply();
                 pendingPages.clear();finishBatch();return;
             }
             if(pendingPage==-1 && pendingChosen==0 && pendingUrls.isEmpty()){
@@ -477,7 +483,7 @@ public class MainActivity extends Activity {
             "let html=await get(new URL('/favorites/',location.origin));if(!/b-favorites_content__cats_list_link/.test(html)&&/name=['\\\"](?:login|email)|Войти в аккаунт|Вход в аккаунт/i.test(html))throw new Error('Войди в аккаунт HDRezka в этом окне.');"+
             "let cat=catsFrom(html);if(!cat){const c=await api({action:'add_cat',name:'RANDOM'});cat=String(c.id||(c.data&&c.data.id)||'');if(!cat)cat=catsFrom(await get(new URL('/favorites/',location.origin)));if(!cat)throw new Error('Не удалось создать или найти папку RANDOM.')}"+
             "const page=await get(new URL('/favorites/'+cat+'/',location.origin));const doc=new DOMParser().parseFromString(page,'text/html'),existing=Object.create(null);const postId=u=>{try{const p=new URL(u).pathname,m=p.match(/(?:^|\\/)(\\d+)-[^/]+\\.html?$/i)||p.match(/(?:^|\\/)(\\d+)(?:\\/|$)/);return m?m[1]:''}catch(e){return''}};doc.querySelectorAll('a[href]').forEach(a=>{const id=postId(a.href);if(id)existing[id]=1});"+
-            "let added=0,skipped=0,failed=[];for(const m of movies){const id=postId(m.url);if(!id){failed.push((m.title||m.url)+': не удалось извлечь ID');continue}if(existing[id]){skipped++;continue}try{await api({action:'add_post',post_id:id,cat_id:cat});existing[id]=1;added++}catch(e){failed.push((m.title||id)+': '+e.message)}}"+
+            "let added=0,skipped=0,failed=[];for(const m of movies){const id=postId(m.url);if(!id){failed.push((m.title||m.url)+': не удалось извлечь ID');continue}if(existing[id]){skipped++;continue}try{await api({action:'add_post',post_id:id,cat_id:cat});existing[id]=1;added++}catch(e){failed.push((m.title||id)+': '+e.message)}await new Promise(resolve=>setTimeout(resolve,1100))}"+
             "return JSON.stringify({ok:true,added:added,skipped:skipped,failed:failed})}catch(e){return JSON.stringify({ok:false,error:String(e.message||e)})}})()";
         setStatus("Синхронизирую закладки HDRezka…");
         target.evaluateJavascript(script,value->{try{
