@@ -496,7 +496,7 @@
         });
       } catch (e) { message('Импорт: ' + (e.message || 'не удалось разобрать файл.')); }
     };
-    reader.readAsText(file); $('#importFile').value = '';
+    reader.readAsText(file); $('#importFile').value = ''; if ($('#settingsImportFile')) $('#settingsImportFile').value = '';
   }
 
 
