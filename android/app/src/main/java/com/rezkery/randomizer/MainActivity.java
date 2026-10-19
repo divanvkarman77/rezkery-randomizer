@@ -446,7 +446,9 @@ public class MainActivity extends Activity {
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             window.setLayout((int)(getResources().getDisplayMetrics().widthPixels*0.94),Math.max(500,getResources().getDisplayMetrics().heightPixels*3/4));
         }
-        TextView heading=dialog.findViewById(android.R.id.title);
+        int titleId=getResources().getIdentifier("alertTitle","id","android");
+        if(titleId==0)titleId=android.R.id.title;
+        TextView heading=dialog.findViewById(titleId);
         if(heading!=null)heading.setTextColor(foreground);
         Button done=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         if(done!=null)done.setTextColor(lightTheme?Color.rgb(42,91,170):Color.rgb(144,180,255));
@@ -687,7 +689,9 @@ public class MainActivity extends Activity {
             int surface=lightTheme?Color.WHITE:Color.rgb(28,31,37),fg=lightTheme?Color.rgb(24,29,38):Color.WHITE;
             scroll.setBackgroundColor(surface);box.setBackgroundColor(surface);
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(surface));
-            TextView dialogTitle=dialog.findViewById(android.R.id.title);if(dialogTitle!=null)dialogTitle.setTextColor(fg);
+            int dialogTitleId=getResources().getIdentifier("alertTitle","id","android");
+            if(dialogTitleId==0)dialogTitleId=android.R.id.title;
+            TextView dialogTitle=dialog.findViewById(dialogTitleId);if(dialogTitle!=null)dialogTitle.setTextColor(fg);
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setTextColor(lightTheme?Color.rgb(42,91,170):Color.rgb(144,180,255));
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(lightTheme?Color.rgb(42,91,170):Color.rgb(144,180,255));
             int maxHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.84);
