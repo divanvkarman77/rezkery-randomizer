@@ -265,7 +265,7 @@ public class MainActivity extends Activity {
         int advanced=simpleMode?View.GONE:View.VISIBLE;
         int[] ids={R.id.domainLabel,R.id.domain,R.id.categoryLabel,R.id.type,R.id.yearLabel,R.id.year,R.id.yearMinus,R.id.yearPlus,R.id.countLabel,R.id.count,
             R.id.theme,R.id.database,R.id.backupTitle,R.id.exportJson,R.id.importJson,R.id.exportHtml,R.id.importHtml,
-            R.id.driveTitle,R.id.driveDescription,R.id.driveExport,R.id.driveImport,R.id.githubTitle,R.id.githubDescription,R.id.githubSync,R.id.hdrezkaSync};
+            R.id.driveTitle,R.id.driveDescription,R.id.driveExport,R.id.driveImport,R.id.githubTitle,R.id.githubDescription,R.id.githubSync,R.id.hdrezkaDescription,R.id.hdrezkaSync};
         for(int id:ids){android.view.View v=findViewById(id);if(v!=null)v.setVisibility(advanced);}
         simpleModeButton.setVisibility(simpleMode?View.GONE:View.VISIBLE);
         advancedModeButton.setVisibility(simpleMode?View.VISIBLE:View.GONE);
@@ -291,7 +291,6 @@ public class MainActivity extends Activity {
         String target=mode==1?hdrezkaUrl(original):original;
         Intent view=new Intent(Intent.ACTION_VIEW,Uri.parse(target)); view.addCategory(Intent.CATEGORY_BROWSABLE);
         try{
-            if(mode==1){view.setPackage("com.hdrezka");}
             startActivity(view);
         }catch(Exception e){
             try{Intent fallback=new Intent(Intent.ACTION_VIEW,Uri.parse(original));fallback.addCategory(Intent.CATEGORY_BROWSABLE);startActivity(fallback);
@@ -394,6 +393,42 @@ public class MainActivity extends Activity {
                 prefs.edit().putString("ghToken",t).putString("ghGist",g).apply();syncGithub(t,g);
             }).show();
     }
+    void hdrezkaSyncDialog(){
+        if(library.length()==0){setStatus("Локальная база пуста — сначала выбери карточки.");return;}
+        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);
+        TextView hint=new TextView(this);hint.setText("Войди в свой аккаунт HDRezka в этом окне. После входа нажми «Синхронизировать»: карточки будут добавлены в папку RANDOM.");hint.setPadding(28,20,28,16);box.addView(hint);
+        WebView loginWeb=new WebView(this);loginWeb.getSettings().setJavaScriptEnabled(true);loginWeb.getSettings().setDomStorageEnabled(true);
+        loginWeb.setWebViewClient(new WebViewClient());box.addView(loginWeb,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,0,1));
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Закладки HDRezka").setView(box)
+            .setNegativeButton("Закрыть",(d,w)->loginWeb.destroy()).setNeutralButton("Синхронизировать",null).create();
+        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->syncHdrezkaBookmarks(loginWeb,dialog)));
+        dialog.show();dialog.getWindow().setLayout(LinearLayout.LayoutParams.MATCH_PARENT,Math.max(500,getResources().getDisplayMetrics().heightPixels*3/4));
+        loginWeb.loadUrl(origin()+"/");
+    }
+    void syncHdrezkaBookmarks(WebView target,AlertDialog dialog){
+        JSONArray movies=new JSONArray();
+        for(int i=0;i<library.length();i++){JSONObject item=library.optJSONObject(i);if(item!=null){JSONObject movie=new JSONObject();try{movie.put("url",item.optString("url",""));movie.put("title",item.optString("title",""));movies.put(movie);}catch(Exception ignored){}}}
+        if(movies.length()==0){setStatus("В базе нет карточек для синхронизации.");return;}
+        String script="(async function(){try{const movies="+movies.toString()+";"+
+            "const get=async u=>{const r=await fetch(u,{credentials:'include',redirect:'follow'});if(!r.ok)throw new Error('HTTP '+r.status);return await r.text()};"+
+            "const api=async data=>{const r=await fetch(new URL('/ajax/favorites/',location.origin),{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(data).toString()});const t=await r.text();let j;try{j=JSON.parse(t)}catch(e){throw new Error('Ответ HDRezka не JSON: войди в аккаунт и повтори попытку')}if(!r.ok||j.success===false)throw new Error(j.message||('Ошибка закладок HTTP '+r.status));return j};"+
+            "const catsFrom=html=>{const d=new DOMParser().parseFromString(html,'text/html');let id='';d.querySelectorAll('a.b-favorites_content__cats_list_link').forEach(a=>{const n=(a.querySelector('.name')||a).textContent.trim();const m=(a.getAttribute('href')||'').match(/\\/favorites\\/(\\d+)/);if(n.toLocaleUpperCase()==='RANDOM'&&m)id=m[1]});return id};"+
+            "let html=await get(new URL('/favorites/',location.origin));if(!/b-favorites_content__cats_list_link/.test(html)&&/name=['\\\"](?:login|email)|Войти в аккаунт|Вход в аккаунт/i.test(html))throw new Error('Войди в аккаунт HDRezka в этом окне.');"+
+            "let cat=catsFrom(html);if(!cat){const c=await api({action:'add_cat',name:'RANDOM'});cat=String(c.id||(c.data&&c.data.id)||'');if(!cat)cat=catsFrom(await get(new URL('/favorites/',location.origin)));if(!cat)throw new Error('Не удалось создать или найти папку RANDOM.')}"+
+            "const page=await get(new URL('/favorites/'+cat+'/',location.origin));const doc=new DOMParser().parseFromString(page,'text/html'),existing=Object.create(null);const postId=u=>{try{const p=new URL(u).pathname,m=p.match(/(?:^|\\/)(\\d+)-[^/]+\\.html?$/i)||p.match(/(?:^|\\/)(\\d+)(?:\\/|$)/);return m?m[1]:''}catch(e){return''}};doc.querySelectorAll('a[href]').forEach(a=>{const id=postId(a.href);if(id)existing[id]=1});"+
+            "let added=0,skipped=0,failed=[];for(const m of movies){const id=postId(m.url);if(!id){failed.push((m.title||m.url)+': не удалось извлечь ID');continue}if(existing[id]){skipped++;continue}try{await api({action:'add_post',post_id:id,cat_id:cat});existing[id]=1;added++}catch(e){failed.push((m.title||id)+': '+e.message)}}"+
+            "return JSON.stringify({ok:true,added:added,skipped:skipped,failed:failed})}catch(e){return JSON.stringify({ok:false,error:String(e.message||e)})}})()";
+        setStatus("Синхронизирую закладки HDRezka…");
+        target.evaluateJavascript(script,value->{try{
+            Object decoded=new JSONTokener(value==null?"":value).nextValue();
+            JSONObject result=new JSONObject(String.valueOf(decoded));
+            if(!result.optBoolean("ok")){setStatus("HDRezka: "+result.optString("error","не удалось выполнить синхронизацию."));return;}
+            String msg="Папка RANDOM: добавлено "+result.optInt("added")+", уже было "+result.optInt("skipped")+".";
+            JSONArray failed=result.optJSONArray("failed");if(failed!=null&&failed.length()>0)msg+=" Ошибки: "+failed.optString(0);
+            setStatus(msg);dialog.dismiss();target.destroy();
+        }catch(Exception e){setStatus("Не удалось прочитать ответ HDRezka: "+e.getMessage());}});
+    }
+
     void syncGithub(String token,String gistId){
         setStatus("Синхронизация с GitHub…");
         new Thread(()->{HttpURLConnection c=null;try{
