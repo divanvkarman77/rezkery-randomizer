@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.*;
+import android.view.View;
 import org.json.*;
 import java.io.*;
 import java.net.HttpURLConnection;
