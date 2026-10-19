@@ -195,7 +195,7 @@ public class MainActivity extends Activity {
     void handleParsed(String value){
         try{
             String raw=value;
-            if(raw.startsWith("\\\"") && raw.endsWith("\\\"")) raw=(String)new JSONTokener(raw).nextValue();
+            if(raw.startsWith("\"") && raw.endsWith("\"")) raw=(String)new JSONTokener(raw).nextValue();
             JSONObject r=new JSONObject(raw); int max=Math.max(1,r.optInt("max",1)); JSONArray cards=r.optJSONArray("cards");
             if(r.optBoolean("challenge",false)){
                 batchNotice="Обнаружена проверка защиты сайта ("+r.optString("title","")+
