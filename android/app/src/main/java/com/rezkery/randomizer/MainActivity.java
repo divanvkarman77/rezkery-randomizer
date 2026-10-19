@@ -17,8 +17,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class MainActivity extends Activity {
-    EditText domain, year;
+    EditText domain, year, count;
     Spinner type, openMode;
+    Button simpleModeButton, advancedModeButton;
+    boolean simpleMode = true;
     TextView status, subtitle;
     WebView web;
     Button random, themeButton, databaseButton, exportJsonButton, importJsonButton,
@@ -35,9 +37,11 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle b){
         super.onCreate(b); setContentView(R.layout.activity_main);
         prefs=getSharedPreferences("rzk",0);
-        domain=findViewById(R.id.domain); year=findViewById(R.id.year); type=findViewById(R.id.type);
+        domain=findViewById(R.id.domain); year=findViewById(R.id.year); count=findViewById(R.id.count); type=findViewById(R.id.type);
         status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); web=findViewById(R.id.web);
         openMode=findViewById(R.id.openMode);
+        simpleModeButton=findViewById(R.id.simpleMode); advancedModeButton=findViewById(R.id.advancedMode);
+        simpleMode=prefs.getBoolean("simpleMode",true);
         random=findViewById(R.id.random); themeButton=findViewById(R.id.theme);
         databaseButton=findViewById(R.id.database); exportJsonButton=findViewById(R.id.exportJson);
         importJsonButton=findViewById(R.id.importJson); exportHtmlButton=findViewById(R.id.exportHtml);
@@ -60,6 +64,8 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView v,String u){ v.evaluateJavascript(parserScript(), value -> handleParsed(value)); }
         });
         random.setOnClickListener(v->startRandom());
+        simpleModeButton.setOnClickListener(v->{simpleMode=true;prefs.edit().putBoolean("simpleMode",true).apply();applyModeVisibility();});
+        advancedModeButton.setOnClickListener(v->{simpleMode=false;prefs.edit().putBoolean("simpleMode",false).apply();applyModeVisibility();});
         themeButton.setOnClickListener(v->{lightTheme=!lightTheme;prefs.edit().putBoolean("lightTheme",lightTheme).apply();applyTheme();});
         databaseButton.setOnClickListener(v->showDatabase());
         exportJsonButton.setOnClickListener(v->chooseExport(PICK_EXPORT_JSON,"rezkery-database.json","application/json"));
@@ -69,6 +75,7 @@ public class MainActivity extends Activity {
         driveExportButton.setOnClickListener(v->chooseExport(PICK_EXPORT_JSON,"rezkery-drive-backup.json","application/json"));
         driveImportButton.setOnClickListener(v->chooseImport("application/json"));
         githubButton.setOnClickListener(v->githubDialog());
+        applyModeVisibility();
         setStatus("База сохранена локально. Повторно выбранные фильмы пропускаются.");
     }
 
@@ -89,7 +96,7 @@ public class MainActivity extends Activity {
         openMode.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
         openMode.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
         type.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
-        for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton}){
+        for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton,simpleModeButton,advancedModeButton}){
             b.setTextColor(lightTheme?Color.WHITE:Color.rgb(20,22,26));
             b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(42,91,170):Color.rgb(224,228,234)));
         }
@@ -135,7 +142,7 @@ public class MainActivity extends Activity {
     void startRandom(){
         String y=year.getText().toString().trim();
         if(!y.isEmpty()&&!y.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
-        prefs.edit().putString("domain",origin()).apply(); pendingPage=-1;
+        prefs.edit().putString("domain",origin()).putString("pickCount",count.getText().toString().trim()).apply(); pendingPage=-1;
         setStatus("Определяю страницы каталога…"); web.loadUrl(pageUrl(1));
     }
     String parserScript(){
@@ -154,17 +161,45 @@ public class MainActivity extends Activity {
     }
     void pickFrom(JSONArray cards){
         try{
-            if(cards==null||cards.length()==0){setStatus("На странице не найдены карточки.");return;}
+            if(cards==null||cards.length()==0){setStatus("На странице не найдены карточки. Если сайт показывает проверку, пройди её в браузере и попробуй снова.");return;}
             HashSet<String> used=usedUrls(); ArrayList<JSONObject> candidates=new ArrayList<>();
             for(int i=0;i<cards.length();i++){JSONObject x=cards.getJSONObject(i);if(!used.contains(x.getString("url")))candidates.add(x);}
             if(candidates.isEmpty()){setStatus("На этой странице все фильмы уже выбраны. Попробуй ещё раз.");return;}
-            JSONObject pick=candidates.get((int)(Math.random()*candidates.size()));String u=pick.getString("url");
-            JSONObject record=new JSONObject();record.put("url",u);record.put("title",pick.optString("title","Без названия"));
-            record.put("date",System.currentTimeMillis());record.put("domain",origin());
-            library.put(record);saveLibrary();
-            openFilm(u);
-            setStatus("Открыто и добавлено в базу: "+pick.optString("title","Без названия")+" · записей: "+library.length());
+            Collections.shuffle(candidates);
+            int wanted=1;
+            try { wanted=Math.max(1,Math.min(30,Integer.parseInt(count.getText().toString().trim()))); } catch(Exception ignored) {}
+            int n=Math.min(wanted,candidates.size());
+            ArrayList<String> urls=new ArrayList<>();
+            for(int i=0;i<n;i++){
+                JSONObject pick=candidates.get(i); String u=pick.getString("url");
+                JSONObject record=new JSONObject();record.put("url",u);record.put("title",pick.optString("title","Без названия"));
+                record.put("date",System.currentTimeMillis());record.put("domain",origin());
+                library.put(record);urls.add(u);
+            }
+            saveLibrary();
+            int mode=prefs.getInt("openMode",0);
+            if(mode==1) {
+                openFilm(urls.get(0));
+                setStatus("Выбрано "+n+" карточек. В HDRezka App открыта первая; остальные сохранены в базе. Всего записей: "+library.length());
+            } else {
+                for(String u:urls) openFilm(u);
+                setStatus("Выбрано и сохранено карточек: "+n+". Всего записей: "+library.length());
+            }
+            String ghToken=prefs.getString("ghToken","");
+            if(!ghToken.isEmpty()) syncGithub(ghToken,prefs.getString("ghGist",""));
         }catch(Exception e){setStatus("Ошибка: "+e.getMessage());}
+    }
+
+    void applyModeVisibility(){
+        int advanced=simpleMode?View.GONE:View.VISIBLE;
+        int[] ids={R.id.domainLabel,R.id.domain,R.id.categoryLabel,R.id.type,R.id.yearLabel,R.id.year,R.id.countLabel,R.id.count,
+            R.id.theme,R.id.database,R.id.backupTitle,R.id.exportJson,R.id.importJson,R.id.exportHtml,R.id.importHtml,
+            R.id.driveTitle,R.id.driveDescription,R.id.driveExport,R.id.driveImport,R.id.githubTitle,R.id.githubDescription,R.id.githubSync};
+        for(int id:ids){android.view.View v=findViewById(id);if(v!=null)v.setVisibility(advanced);}
+        simpleModeButton.setVisibility(simpleMode?View.GONE:View.VISIBLE);
+        advancedModeButton.setVisibility(simpleMode?View.VISIBLE:View.GONE);
+        random.setText(simpleMode?"🎲 ВЫБРАТЬ СЛУЧАЙНУЮ КАРТОЧКУ":"ОТКРЫТЬ СЛУЧАЙНЫЕ КАРТОЧКИ");
+        count.setText(prefs.getString("pickCount","1"));
     }
 
     String hdrezkaUrl(String original){
