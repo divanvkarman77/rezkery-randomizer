@@ -165,8 +165,10 @@ public class MainActivity extends Activity {
             if(raw.startsWith("\"") && raw.endsWith("\"")) raw=(String)new JSONTokener(raw).nextValue();
             JSONObject r=new JSONObject(raw); int max=Math.max(1,r.optInt("max",1)); JSONArray cards=r.optJSONArray("cards");
             if(pendingPage==-1 && pendingChosen==0 && pendingUrls.isEmpty()){
-                pendingMax=max;
-                if(pendingMax<2){int t=type.getSelectedItemPosition();int[] fallback={2530,1731,520,173,107};pendingMax=fallback[Math.max(0,Math.min(t,fallback.length-1))];}
+                // Trust pagination actually found in the loaded page. A fabricated
+                // fallback (thousands of pages) can trap the app in an endless scan
+                // when the mirror changes its pagination markup or shows a challenge.
+                pendingMax=Math.max(1,Math.min(max,10000));
                 int wanted=Math.min(pendingTotal,pendingMax);
                 ArrayList<Integer> all=new ArrayList<>(); for(int p=1;p<=pendingMax;p++)all.add(p);
                 Collections.shuffle(all);
@@ -213,7 +215,16 @@ public class MainActivity extends Activity {
             saveLibrary();
             int mode=prefs.getInt("openMode",0);
             if(mode==1){openFilm(pendingUrls.get(0));setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц. В HDRezka App открыта первая; остальные сохранены в базе. Всего записей: "+library.length());}
-            else {for(String u:pendingUrls)openFilm(u);setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц и сохранено в базе. Всего записей: "+library.length());}
+            else {
+                // Launch ACTION_VIEW intents in separate UI ticks so Android's browser
+                // has time to process every selected card instead of dropping launches.
+                final ArrayList<String> toOpen=new ArrayList<>(pendingUrls);
+                for(int i=0;i<toOpen.size();i++){
+                    final String u=toOpen.get(i);
+                    new android.os.Handler(getMainLooper()).postDelayed(()->openFilm(u),i*650L);
+                }
+                setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц и сохранено в базе. Всего записей: "+library.length());
+            }
             String ghToken=prefs.getString("ghToken","");if(!ghToken.isEmpty())syncGithub(ghToken,prefs.getString("ghGist",""));
         }catch(Exception e){setStatus("Ошибка сохранения выбранных карточек: "+e.getMessage());}
         finally{pendingPage=-1;pendingTotal=1;pendingChosen=0;pendingPages.clear();pendingBatchUrls.clear();pendingUrls.clear();attemptedPages.clear();pendingTitles.clear();}
