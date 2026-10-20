@@ -619,7 +619,11 @@ public class MainActivity extends Activity {
     JSONObject jsonFromEvaluate(String value)throws Exception{
         Object decoded=new JSONTokener(value==null?"":value).nextValue();
         if(decoded instanceof JSONObject)return (JSONObject)decoded;
-        if(decoded instanceof String)return new JSONObject((String)decoded);
+        if(decoded instanceof String){
+            String text=((String)decoded).trim();
+            if(text.isEmpty()||"null".equalsIgnoreCase(text))throw new JSONException("WebView вернул пустой ответ.");
+            return new JSONObject(text);
+        }
         throw new JSONException("Ответ WebView ещё не готов или имеет неверный формат.");
     }
     void pollLoginResult(WebView target,EditText password,TextView label,CookieManager cookieManager,int attempt){
@@ -766,23 +770,33 @@ public class MainActivity extends Activity {
     }
     String buildHdrezkaSyncScript(boolean upload,JSONArray movies,int delayMs,boolean useCurrentPage){
         String movieJson=movies==null?"[]":movies.toString();
-        return "window.__rzkSyncResult=null;(async function(){const P=window.__rzkSyncProgress={phase:'Подготовка',done:0,total:0};try{const movies="+movieJson+";"+
-            "const wait=ms=>new Promise(r=>setTimeout(r,ms));let lastRequest="+(useCurrentPage?"Date.now()":"0")+";"+
-            "const rate=async()=>{if(lastRequest){const left="+Math.max(1000,delayMs)+"-(Date.now()-lastRequest);if(left>0)await wait(left)}lastRequest=Date.now()};"+
-            "const get=async u=>{await rate();const r=await fetch(u,{credentials:'include',redirect:'follow'});if(!r.ok)throw new Error('HTTP '+r.status);const t=await r.text();if(/anubis|cloudflare|cdn-cgi\\/challenge|captcha|checking your browser|just a moment|проверте.*человек/i.test(t))throw new Error('HDRezka показала проверку защиты. Запросы остановлены; пройди проверку вручную.');return t};"+
-            "const post=async data=>{await rate();const r=await fetch(new URL('/ajax/favorites/',location.origin),{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(data).toString()});const t=await r.text();if(/anubis|cloudflare|cdn-cgi\\/challenge|captcha|checking your browser|just a moment/i.test(t))throw new Error('HDRezka показала проверку защиты. Запросы остановлены; пройди проверку вручную.');let j;try{j=JSON.parse(t)}catch(e){throw new Error('Ответ HDRezka не JSON: проверь вход в аккаунт.')}if(!r.ok||j.success===false)throw new Error(j.message||('Ошибка закладок HTTP '+r.status));return j};"+
-            "const catFrom=h=>{const d=new DOMParser().parseFromString(h,'text/html');let id='';d.querySelectorAll('a.b-favorites_content__cats_list_link').forEach(a=>{const n=(a.querySelector('.name')||a).textContent.trim().toUpperCase(),m=(a.getAttribute('href')||'').match(/\\/favorites\\/(\\d+)/);if((n==='RANDOM'||/^RANDOM(?:\\s|$)/.test(n))&&m)id=m[1]});return id};"+
-            "const parse=h=>{const d=new DOMParser().parseFromString(h,'text/html'),items=[],seen={};let max=1;d.querySelectorAll('.b-content__inline_item').forEach(n=>{const a=n.querySelector('.b-content__inline_item-link a[href]')||n.querySelector('a[href]');if(!a)return;const u=a.href;if(seen[u])return;seen[u]=1;const l=n.querySelector('.b-content__inline_item-link');const ys=(n.innerText||'').match(/(19|20|21)\\d{2}/g)||[],uy=u.match(/(19|20|21)\\d{2}/g)||[];items.push({url:u,title:(l?l.innerText:a.innerText||'Без названия').trim(),year:uy.length?uy[uy.length-1]:(ys.length?ys[ys.length-1]:''),domain:location.origin})});d.querySelectorAll('a[href]').forEach(a=>{const m=a.href.match(/\\/page\\/(\\d+)\\/?(?:\\?.*)?$/);if(m)max=Math.max(max,parseInt(m[1],10)||1)});return{items:items,max:max}};"+
-            "P.phase='Открываю закладки HDRezka';let home="+(useCurrentPage?"document.documentElement.outerHTML":"await get(new URL('/favorites/',location.origin))")+";"+
-            "if(!/b-favorites_content__cats_list_link/.test(home)&&/(?:name=['\\\"](?:login|email)|Войти в аккаунт|Вход в аккаунт)/i.test(home))throw new Error('Войди в аккаунт HDRezka в этом окне.');"+
-            "let cat=catFrom(home);if(!cat){if(!"+(upload?"true":"false")+")return JSON.stringify({ok:true,noFolder:true,items:[],added:0,skipped:0});"+
-            "P.phase='Создаю папку RANDOM';const c=await post({action:'add_cat',name:'RANDOM'});cat=String(c.id||(c.data&&c.data.id)||'');if(!cat){home=await get(new URL('/favorites/',location.origin));cat=catFrom(home)}if(!cat)throw new Error('Не удалось создать или найти папку RANDOM.')}"+
-            "const base='/favorites/'+cat+'/',first=await get(new URL(base,location.origin)),firstData=parse(first),items=new Map();firstData.items.forEach(x=>items.set(x.url,x));const max=Math.max(1,Math.min(firstData.max,1000));"+
-            "P.phase='Импорт папки RANDOM';P.total=max;P.done=1;for(let p=2;p<=max;p++){const h=await get(new URL(base+'page/'+p+'/',location.origin)),data=parse(h);data.items.forEach(x=>items.set(x.url,x));P.done=p;}"+
-            "const imported=Array.from(items.values()),ids=new Set(),urls=new Set();const postId=u=>{try{const p=new URL(u).pathname,m=p.match(/(?:^|\\/)(\\d+)-[^/]+\\.html?$/i)||p.match(/(?:^|\\/)(\\d+)(?:\\/|$)/);return m?m[1]:''}catch(e){return''}};imported.forEach(x=>{urls.add(x.url);const id=postId(x.url);if(id)ids.add(id)});"+
-            "let added=0,skipped=0,failed=[];if("+upload+"){P.phase='Добавляю отсутствующие карточки';P.done=0;P.total=movies.length;for(let i=0;i<movies.length;i++){const m=movies[i],id=postId(m.url||'');P.done=i+1;if(!m.url||!id){failed.push((m.title||m.url||'карточка')+': не удалось определить ссылку или ID');continue}if(urls.has(m.url)||ids.has(id)){skipped++;continue}try{await post({action:'add_post',post_id:id,cat_id:cat});urls.add(m.url);ids.add(id);added++}catch(e){failed.push((m.title||id)+': '+e.message)}}"+
+        String script=
+            "window.__rzkSyncResult=null;(async function(){"+
+            "const P=window.__rzkSyncProgress={phase:'Подготовка',done:0,total:0};try{"+
+            "const movies="+movieJson+";"+
+            "const rateMs="+Math.max(1000,delayMs)+";"+
+            "let lastRequest="+(useCurrentPage?"Date.now()":"0")+";"+
+            "const uploadEnabled="+upload+";"+
+            "const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));"+
+            "const rate=async()=>{if(lastRequest){const left=rateMs-(Date.now()-lastRequest);if(left>0)await wait(left)}lastRequest=Date.now()};"+
+            "const hasChallenge=value=>{const text=String(value||'').toLowerCase();return ['anubis','cloudflare','cdn-cgi/challenge','captcha','checking your browser','just a moment','проверьте, что вы человек','подтвердите, что вы человек'].some(part=>text.includes(part))};"+
+            "const get=async url=>{await rate();const response=await fetch(String(url),{credentials:'include',redirect:'follow'});const text=await response.text();if(hasChallenge(text))throw new Error('HDRezka показала проверку защиты. Запросы остановлены; пройди проверку вручную.');if(!response.ok)throw new Error('HTTP '+response.status);return text};"+
+            "const post=async data=>{await rate();const response=await fetch(new URL('/ajax/favorites/',location.origin).href,{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(data).toString()});const text=await response.text();if(hasChallenge(text))throw new Error('HDRezka показала проверку защиты. Запросы остановлены; пройди проверку вручную.');let result;try{result=JSON.parse(text)}catch(e){throw new Error('Ответ HDRezka не является JSON. Проверь вход и адрес зеркала.')}if(!result||typeof result!=='object')throw new Error('HDRezka вернула пустой ответ на запрос закладок.');const success=result.success;if(!response.ok||success===false||success===0||success==='0'||success==='false')throw new Error(result.message||result.error||('Ошибка закладок HTTP '+response.status));return result};"+
+            "const digits=value=>{const text=String(value||'');return text.length>0&&Array.from(text).every(ch=>ch>='0'&&ch<='9')};"+
+            "const absolute=(value,base)=>{try{return new URL(value,base).href}catch(e){return ''}};"+
+            "const catFrom=(html,base)=>{const doc=new DOMParser().parseFromString(html,'text/html');let id='';doc.querySelectorAll('a.b-favorites_content__cats_list_link').forEach(link=>{const name=(link.querySelector('.name')||link).textContent.trim().toUpperCase();const href=absolute(link.getAttribute('href')||'',base);let parts=[];try{parts=new URL(href).pathname.split('/').filter(Boolean)}catch(e){}const candidate=parts[0]==='favorites'?(parts[1]||''):'';if((name==='RANDOM'||name.startsWith('RANDOM '))&&digits(candidate))id=candidate});return id};"+
+            "const yearFrom=value=>{const text=String(value||'');let found='';for(let i=0;i+3<text.length;i++){const year=text.slice(i,i+4);if((year.startsWith('19')||year.startsWith('20')||year.startsWith('21'))&&digits(year))found=year}return found};"+
+            "const parse=(html,base)=>{const doc=new DOMParser().parseFromString(html,'text/html'),items=[],seen=new Set();let max=1;doc.querySelectorAll('.b-content__inline_item').forEach(node=>{const link=node.querySelector('.b-content__inline_item-link a[href]')||node.querySelector('a[href]');if(!link)return;const url=absolute(link.getAttribute('href')||'',base);if(!url||seen.has(url))return;seen.add(url);const titleNode=node.querySelector('.b-content__inline_item-link');const title=(titleNode?titleNode.textContent:link.textContent||'Без названия').trim();const image=node.querySelector('.b-content__inline_item-cover img');const poster=image?absolute(image.getAttribute('src')||'',base):'';const pageUrl=new URL(url);const path=pageUrl.pathname.toLowerCase();const type=path.includes('/films/')?'film':path.includes('/series/')?'series':path.includes('/cartoons/')||path.includes('/multfil')?'cartoon':path.includes('/anime/')?'anime':'other';items.push({url:url,title:title,year:yearFrom(title)||yearFrom(url),poster:poster,type:type,domain:location.origin})});doc.querySelectorAll('a[href]').forEach(link=>{const href=absolute(link.getAttribute('href')||'',base);if(!href)return;try{const page=new URL(href);const parts=page.pathname.split('/').filter(Boolean);const index=parts.lastIndexOf('page');if(index>=0&&digits(parts[index+1]))max=Math.max(max,parseInt(parts[index+1],10)||1);const queryPage=page.searchParams.get('page');if(digits(queryPage))max=Math.max(max,parseInt(queryPage,10)||1)}catch(e){}});return{items:items,max:max}};"+
+            "P.phase='Открываю закладки HDRezka';const homeUrl=new URL('/favorites/',location.origin).href;let home=useCurrentPage?document.documentElement.outerHTML:await get(homeUrl);const homeBase=useCurrentPage?location.href:homeUrl;"+
+            "let cat=catFrom(home,homeBase);if(!cat){const lower=home.toLowerCase();if(lower.includes('type=\"password\"')||lower.includes('login_name')||lower.includes('войти в аккаунт')||lower.includes('вход в аккаунт'))throw new Error('HDRezka вернула форму входа. Заново войди в аккаунт в этом окне.');if(!uploadEnabled)return JSON.stringify({ok:true,noFolder:true,items:[],added:0,skipped:0});"+
+            "P.phase='Создаю папку RANDOM';const created=await post({action:'add_cat',name:'RANDOM'});cat=String(created.id||(created.data&&created.data.id)||'');if(!cat){home=await get(homeUrl);cat=catFrom(home,homeUrl)}if(!cat)throw new Error('HDRezka не вернула идентификатор папки RANDOM.')}"+
+            "const collectionUrl=new URL('/favorites/'+encodeURIComponent(cat)+'/',location.origin).href;P.phase='Читаю папку RANDOM';const first=await get(collectionUrl);const firstPage=parse(first,collectionUrl);const items=new Map();firstPage.items.forEach(item=>items.set(item.url,item));const max=Math.max(1,Math.min(firstPage.max,1000));"+
+            "P.phase='Импорт папки RANDOM';P.total=max;P.done=1;for(let page=2;page<=max;page++){const pageUrl=new URL('/favorites/'+encodeURIComponent(cat)+'/page/'+page+'/',location.origin).href;const html=await get(pageUrl);const data=parse(html,pageUrl);data.items.forEach(item=>items.set(item.url,item));P.done=page}"+
+            "const imported=Array.from(items.values()),ids=new Set(),urls=new Set();const postId=value=>{try{const parts=new URL(value).pathname.split('/').filter(Boolean);for(let i=parts.length-1;i>=0;i--){const segment=parts[i],dash=segment.indexOf('-');if(dash<1)continue;const candidate=segment.slice(0,dash);if(digits(candidate))return candidate}return ''}catch(e){return ''}};imported.forEach(item=>{urls.add(item.url);const id=postId(item.url);if(id)ids.add(id)});"+
+            "let added=0,skipped=0,failed=[];if(uploadEnabled){P.phase='Добавляю отсутствующие карточки';P.done=0;P.total=movies.length;for(let i=0;i<movies.length;i++){const item=movies[i],id=postId(item.url||'');P.done=i+1;if(!item.url||!id){failed.push((item.title||item.url||'карточка')+': не удалось определить ссылку или ID');continue}if(urls.has(absolute(item.url,location.origin))||ids.has(id)){skipped++;continue}try{await post({action:'add_post',post_id:id,cat_id:cat});urls.add(absolute(item.url,location.origin));ids.add(id);added++}catch(error){failed.push((item.title||id)+': '+String(error.message||error))}}}"+
             "return JSON.stringify({ok:true,noFolder:false,items:imported,added:added,skipped:skipped,failed:failed})"+
-            "}catch(e){return JSON.stringify({ok:false,error:String(e.message||e)})}})().then(function(value){window.__rzkSyncResult=value});true";
+            "}catch(error){return JSON.stringify({ok:false,error:String(error.message||error)})}})().then(value=>{window.__rzkSyncResult=value});true";
+        return script;
     }
     void pollHdrezkaProgress(WebView target,TextView label,ProgressBar bar,boolean[] active){
         if(!active[0])return;
@@ -843,7 +857,14 @@ public class MainActivity extends Activity {
         int delay=Math.max(1,prefs.getInt("requestIntervalSeconds",2))*1000;
         String script=buildHdrezkaSyncScript(upload,movies,delay,false);
         pollHdrezkaProgress(target,label,bar,active);
-        target.evaluateJavascript(script,ignored->pollHdrezkaSyncResult(target,label,bar,active,0));
+        target.evaluateJavascript(script,result->{
+            if(result==null||"null".equals(result)){
+                active[0]=false;bar.setIndeterminate(false);
+                String error="Не удалось запустить сценарий синхронизации в WebView.";
+                label.setText(error);setStatus(error);return;
+            }
+            pollHdrezkaSyncResult(target,label,bar,active,0);
+        });
     }
     void pollAutoImportResult(WebView target,android.view.ViewGroup root,int attempt){
         if(attempt>1800){setStatus("Автоимпорт HDRezka остановлен по тайм-ауту.");cleanupAutoImportWeb(target,root);return;}
