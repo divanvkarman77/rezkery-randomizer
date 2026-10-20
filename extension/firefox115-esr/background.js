@@ -3,6 +3,8 @@
   var API = typeof browser !== 'undefined' ? browser : chrome;
   var isFirefox = typeof browser !== 'undefined';
   var parseJobs = Object.create(null);
+  var parseJobsByRequest = Object.create(null);
+  var internalParseSequence = 0;
   var runningTasks = Object.create(null);
   var settingsKey = 'rz_settings_v1';
   var dbKey = 'rz_movies_v1';
@@ -38,11 +40,24 @@
   API.tabs.onUpdated.addListener(function(tabId, changeInfo) {
     if (changeInfo.status !== 'complete' || !parseJobs[tabId]) return;
     executeParser(tabId).catch(function(e){
-      var job=parseJobs[tabId]; if(job){ delete parseJobs[tabId]; removeTab(tabId); send({type:'REZKERY_PARSE_ERROR',requestId:job.requestId,error:e.message||'Не удалось внедрить парсер.'}); }
+      var job=parseJobs[tabId];
+      if(job){
+        delete parseJobs[tabId];
+        removeTab(tabId);
+        var error=e&&e.message?e.message:'Не удалось внедрить парсер.';
+        settleParseRequest(job.requestId,new Error(error));
+        send({type:'REZKERY_PARSE_ERROR',requestId:job.requestId,error:error});
+      }
     });
   });
   API.tabs.onRemoved.addListener(function(tabId){
-    if(parseJobs[tabId]) { var job=parseJobs[tabId]; delete parseJobs[tabId]; send({type:'REZKERY_PARSE_ERROR',requestId:job.requestId,error:'Временная вкладка была закрыта.'}); }
+    if(parseJobs[tabId]) {
+      var job=parseJobs[tabId];
+      delete parseJobs[tabId];
+      var error='Временная вкладка была закрыта.';
+      settleParseRequest(job.requestId,new Error(error));
+      send({type:'REZKERY_PARSE_ERROR',requestId:job.requestId,error:error});
+    }
   });
 
   API.runtime.onMessage.addListener(function(message, sender) {
@@ -53,9 +68,9 @@
     if (message.type === 'REZKERY_PAGE_PARSED' && sender.tab) {
       var job=parseJobs[sender.tab.id];
       if(job){
-        if (parseJobsByRequest[job.requestId]) parseJobsByRequest[job.requestId].resolve(message.result);
         delete parseJobs[sender.tab.id];
         removeTab(sender.tab.id);
+        settleParseRequest(job.requestId,null,message.result);
         send({type:'REZKERY_PARSE_RESULT',requestId:job.requestId,result:message.result});
       }
     }
@@ -66,11 +81,43 @@
     }
   });
 
+  function settleParseRequest(requestId,error,result) {
+    var pending=parseJobsByRequest[requestId];
+    if(!pending)return false;
+    delete parseJobsByRequest[requestId];
+    if(pending.timer)clearTimeout(pending.timer);
+    if(error)pending.reject(error);
+    else pending.resolve(result);
+    return true;
+  }
+
+  function parseInternal(url) {
+    var requestId='internal-'+Date.now()+'-'+(++internalParseSequence);
+    return new Promise(function(resolve,reject){
+      var timer=setTimeout(function(){
+        var pending=parseJobsByRequest[requestId];
+        if(pending&&pending.tabId!=null){
+          delete parseJobs[pending.tabId];
+          removeTab(pending.tabId);
+        }
+        settleParseRequest(requestId,new Error('Не дождался ответа парсера страницы за 45 секунд.'));
+      },45000);
+      parseJobsByRequest[requestId]={resolve:resolve,reject:reject,timer:timer,tabId:null};
+      startParse(requestId,url);
+    });
+  }
+
   function startParse(requestId,url) {
     return createTab('about:blank',false).then(function(tab){
       parseJobs[tab.id]={requestId:requestId};
+      var pending=parseJobsByRequest[requestId];
+      if(pending)pending.tabId=tab.id;
       return updateTab(tab.id,url);
-    }).catch(function(e){send({type:'REZKERY_PARSE_ERROR',requestId:requestId,error:e.message||'Не удалось открыть страницу.'});});
+    }).catch(function(e){
+      var error=e&&e.message?e.message:'Не удалось открыть страницу.';
+      settleParseRequest(requestId,new Error(error));
+      send({type:'REZKERY_PARSE_ERROR',requestId:requestId,error:error});
+    });
   }
 
   function getSettings(){ return storageGet(settingsKey).then(function(s){ s=s||{}; return {domain:s.domain||'https://rezkery.com',pageCountOverride:Math.max(0,Math.min(100000,parseInt(s.pageCountOverride,10)||0))}; }); }
