@@ -301,7 +301,16 @@
     var genre = genreForFilter(filter);
     var suffix = genre ? '?filter=last&genre=' + genre : '';
     if (scope === 'year') {
-      return BASE_ORIGIN + '/xfsearch/year/' + year + (page > 1 ? '/page/' + page + '/' : '/') + suffix;
+      var host = new URL(BASE_ORIGIN).hostname.toLowerCase();
+      var legacyYearRoutes = /(^|\\.)rezkery\\.com$/.test(host);
+      var path = !legacyYearRoutes && filter === 'film'
+        ? '/films/best/foreign/' + year
+        : !legacyYearRoutes && filter === 'series'
+          ? '/series/best/' + year
+          : '/year/' + year;
+      var yearUrl = BASE_ORIGIN + path + (page > 1 ? '/page/' + page : '') + '/';
+      var yearGenre = legacyYearRoutes || (filter !== 'all' && filter !== 'film' && filter !== 'series') ? genre : '';
+      return yearUrl + (yearGenre ? '?filter=last&genre=' + yearGenre : '');
     }
     return BASE_ORIGIN + (page > 1 ? '/page/' + page + '/' : '/') + suffix;
   }
