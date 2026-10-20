@@ -79,7 +79,7 @@
     var g=genre(filter), q=g?'?filter=last&genre='+g:'';
     if(scope==='year'){
       var host=new URL(origin).hostname.toLowerCase();
-      var legacyYearRoutes=/(^|\\.)rezkery\\.com$/.test(host);
+      var legacyYearRoutes=/(^|\.)rezkery\.com$/.test(host);
       var path=!legacyYearRoutes&&filter==='film'?'/films/best/foreign/'+year:
         !legacyYearRoutes&&filter==='series'?'/series/best/'+year:'/year/'+year;
       var yearUrl=origin+path+(page>1?'/page/'+page:'')+'/';
