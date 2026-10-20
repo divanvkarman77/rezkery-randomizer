@@ -80,3 +80,5 @@ body.busy .primary, body.busy .secondary, body.busy .danger { opacity: .55; }
 .progress-track span{display:block;height:100%;width:0;border-radius:inherit;background:#78a9ff;transition:width .2s ease}
 .progress-track span.indeterminate{animation:random-progress 1.2s ease-in-out infinite}
 @keyframes random-progress{0%{transform:translateX(-110%)}100%{transform:translateX(300%)}}
+
+.selected-batch{outline:2px solid #78a9ff;outline-offset:1px}
