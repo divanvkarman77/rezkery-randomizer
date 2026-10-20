@@ -5,12 +5,17 @@
   var API = isFirefox ? browser : chrome;
   var DB_KEY = 'rz_movies_v1';
   var USED_KEY = 'rz_used_v1';
+  var UI_STATE_KEY = 'rz_ui_state_v1';
+  var PAGE_CACHE_KEY = 'rz_page_cache_v1';
   var pageCountOverride = 0;
   var hdrezkaSyncBusy = false;
   var currentCatalogPages = Object.create(null);
   var currentYearPages = Object.create(null);
   var currentYear = null;
   var currentYearFilter = 'all';
+  var savedUiState = {};
+  var selectedTab = 'random';
+  var lastBatchSize = 1;
   var pending = Object.create(null);
   var busy = false;
   var activeRandomTaskId = null;
@@ -103,7 +108,12 @@
     }
     if (message.type === 'REZKERY_HDREZKA_PROGRESS') {
       var p = message.progress || {};
-      $('#hdrezkaSyncStatus').textContent = (p.phase || 'Синхронизация…') + (p.total ? ' — ' + p.done + ' из ' + p.total : '…');
+      var syncText = (p.phase || 'Синхронизация…') + (p.total ? ' — ' + p.done + ' из ' + p.total : '…');
+      $('#hdrezkaSyncStatus').textContent = syncText;
+      if (hdrezkaSyncBusy) message(syncText, true);
+    }
+    if (message.type === 'REZKERY_PAGE_COUNT_DETECTED') {
+      rememberPageCount(message.scope, message.year, message.filter, message.pages);
     }
     if (message.type === 'REZKERY_TASK_PROGRESS' && message.taskId === activeRandomTaskId) {
       var progress = message.progress || {};
@@ -327,12 +337,126 @@
   }
 
   function loadSettings() {
-    return storageGet('rz_settings_v1').then(function (s) {
-      s = s || {};
+    return Promise.all([
+      storageGet('rz_settings_v1'),
+      storageGet(UI_STATE_KEY),
+      storageGet(PAGE_CACHE_KEY)
+    ]).then(function (values) {
+      var s = values[0] || {};
       try { BASE_ORIGIN = normalizeOrigin(s.domain || DEFAULT_ORIGIN); } catch (e) { BASE_ORIGIN = DEFAULT_ORIGIN; }
       pageCountOverride = Math.max(0, Math.min(100000, parseInt(s.pageCountOverride, 10) || 0));
+      savedUiState = values[1] || {};
+      var cache = values[2] || {};
+      if (cache.domain === BASE_ORIGIN) {
+        currentCatalogPages = Object.assign(Object.create(null), cache.catalog || {});
+        currentYearPages = Object.assign(Object.create(null), cache.year || {});
+      } else {
+        currentCatalogPages = Object.create(null);
+        currentYearPages = Object.create(null);
+      }
       return { domain: BASE_ORIGIN, pageCountOverride: pageCountOverride };
     });
+  }
+
+  function saveUiState() {
+    var state = {
+      tab: selectedTab,
+      catalogType: $('#catalogType').value,
+      year: Number($('#yearSelect').value) || 1984,
+      yearType: $('#yearType').value,
+      dbTypeFilter: $('#dbTypeFilter').value,
+      lastCount: lastBatchSize,
+      customSize: Number($('#customSize').value) || 2,
+      yearCustomSize: Number($('#yearCustomSize').value) || 2
+    };
+    var values = {}; values[UI_STATE_KEY] = state;
+    return storageSet(values);
+  }
+
+  function savePageCache() {
+    var cache = {
+      domain: BASE_ORIGIN,
+      catalog: Object.assign({}, currentCatalogPages),
+      year: Object.assign({}, currentYearPages)
+    };
+    var values = {}; values[PAGE_CACHE_KEY] = cache;
+    return storageSet(values);
+  }
+
+  function renderPageCountDisplays() {
+    if (!$('#catalogPages')) return;
+    var catalogFilter = $('#catalogType').value || 'all';
+    var catalogPages = Number(currentCatalogPages[catalogFilter]) || 0;
+    var catalogText = catalogPages ? String(catalogPages) : (pageCountOverride ? String(pageCountOverride) + ' (вручную)' : 'не определено');
+    if (catalogPages && pageCountOverride && catalogPages !== pageCountOverride) catalogText += ' · рандом: ' + pageCountOverride;
+    $('#catalogPages').textContent = catalogText;
+
+    var year = Number($('#yearSelect').value) || 1984;
+    var yearFilter = $('#yearType').value || 'all';
+    var cacheKey = String(year) + ':' + yearFilter;
+    var yearPages = Number(currentYearPages[cacheKey]) || 0;
+    $('#yearPages').textContent = yearPages ? String(yearPages) : 'не определено';
+    $('#yearPageStatus').textContent = yearPages
+      ? 'Сохранена пагинация ' + year + ' · ' + filterLabel(yearFilter) + '.'
+      : 'Количество определяется по пагинации выбранного года.';
+  }
+
+  function rememberPageCount(scope, year, filter, pages) {
+    pages = Number(pages);
+    filter = filter || 'all';
+    if (!Number.isInteger(pages) || pages < 1) return Promise.resolve();
+    if (scope === 'year') currentYearPages[String(Number(year)) + ':' + filter] = pages;
+    else currentCatalogPages[filter] = pages;
+    renderPageCountDisplays();
+    return savePageCache().catch(function () {});
+  }
+
+  function saveUiStateQuietly() {
+    saveUiState().catch(function () {});
+  }
+
+  function setLastBatchSize(count) {
+    lastBatchSize = Math.max(1, Math.min(30, Number(count) || 1));
+    syncBatchButtonSelection();
+    saveUiStateQuietly();
+  }
+
+  function syncBatchButtonSelection() {
+    $$('.batch, .yearBatch').forEach(function (button) {
+      var panel = button.closest('.panel');
+      var selected = !!(panel && panel.classList.contains('active') && Number(button.dataset.size) === lastBatchSize);
+      button.classList.toggle('selected-batch', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
+  }
+
+  function activateTab(tab, persist) {
+    if (['random', 'year', 'database'].indexOf(tab) < 0) tab = 'random';
+    selectedTab = tab;
+    $$('.tab').forEach(function (button) { button.classList.toggle('active', button.dataset.tab === tab); });
+    $$('.panel').forEach(function (panel) { panel.classList.toggle('active', panel.id === 'tab-' + tab); });
+    syncBatchButtonSelection();
+    if (persist) {
+      saveUiStateQuietly();
+      if (tab === 'database') renderDb();
+    }
+  }
+
+  function restoreUiState() {
+    if (savedUiState.catalogType && TYPE_LABELS[savedUiState.catalogType]) $('#catalogType').value = savedUiState.catalogType;
+    if (savedUiState.yearType && TYPE_LABELS[savedUiState.yearType]) $('#yearType').value = savedUiState.yearType;
+    if (savedUiState.dbTypeFilter && TYPE_LABELS[savedUiState.dbTypeFilter]) $('#dbTypeFilter').value = savedUiState.dbTypeFilter;
+    var year = Number(savedUiState.year);
+    if (Number.isInteger(year) && year >= 1900 && year <= new Date().getFullYear() + 1) $('#yearSelect').value = String(year);
+    var custom = Number(savedUiState.customSize);
+    if (Number.isInteger(custom) && custom >= 1 && custom <= 30) $('#customSize').value = String(custom);
+    custom = Number(savedUiState.yearCustomSize);
+    if (Number.isInteger(custom) && custom >= 1 && custom <= 30) $('#yearCustomSize').value = String(custom);
+    lastBatchSize = Math.max(1, Math.min(30, parseInt(savedUiState.lastCount, 10) || 1));
+    currentYear = Number($('#yearSelect').value) || 1984;
+    currentYearFilter = $('#yearType').value || 'all';
+    activateTab(savedUiState.tab || 'random', false);
+    renderPageCountDisplays();
   }
 
   function saveSettings() {
@@ -348,8 +472,8 @@
       BASE_ORIGIN = origin; pageCountOverride = pages;
       input.value = BASE_ORIGIN; $('#pageCountOverride').value = String(pages);
       currentCatalogPages = Object.create(null); currentYearPages = Object.create(null);
-      $('#catalogPages').textContent = pages ? String(pages) + ' (вручную)' : 'не определено';
-      $('#yearPages').textContent = 'не определено';
+      savePageCache().catch(function () {});
+      renderPageCountDisplays();
       $('#settingsStatus').textContent = 'Сохранено: ' + BASE_ORIGIN + ' · страниц: ' + (pages || 'авто');
       message('Настройки сохранены.');
     });
@@ -363,7 +487,7 @@
   function detectCatalogPages(filter) {
     filter = filter || 'all';
     if (currentCatalogPages[filter]) {
-      $('#catalogPages').textContent = String(currentCatalogPages[filter]);
+      renderPageCountDisplays();
       return Promise.resolve(currentCatalogPages[filter]);
     }
     $('#catalogPages').textContent = 'определяю…';
@@ -378,9 +502,9 @@
       if (!pagination.exact || max < 2) {
         throw new Error('Сайт не показал последнюю страницу каталога. Можно указать её число в настройках.');
       }
-      currentCatalogPages[filter] = max;
-      $('#catalogPages').textContent = String(max) + (pageCountOverride ? ' · рандом: ' + pageCountOverride : '');
-      return max;
+      return rememberPageCount('catalog', null, filter, max).then(function () {
+        return max;
+      });
     }).catch(function (e) {
       $('#catalogPages').textContent = 'не определено';
       throw e;
@@ -393,7 +517,7 @@
     if (!force && currentYearPages[cacheKey]) {
       currentYear = year;
       currentYearFilter = filter;
-      $('#yearPages').textContent = String(currentYearPages[cacheKey]);
+      renderPageCountDisplays();
       return Promise.resolve(currentYearPages[cacheKey]);
     }
     currentYear = year;
@@ -411,10 +535,10 @@
       if (!pagination.exact || max < 1) {
         throw new Error('Сайт не сообщил количество страниц за ' + year + '.');
       }
-      currentYearPages[cacheKey] = max;
-      $('#yearPages').textContent = String(max);
-      $('#yearPageStatus').textContent = 'Определено по пагинации ' + year + ' · ' + filterLabel(filter) + '.';
-      return max;
+      return rememberPageCount('year', year, filter, max).then(function () {
+        $('#yearPageStatus').textContent = 'Определено по пагинации ' + year + ' · ' + filterLabel(filter) + '.';
+        return max;
+      });
     }).catch(function (e) {
       $('#yearPages').textContent = 'не определено';
       $('#yearPageStatus').textContent = e.message || 'Не удалось прочитать пагинацию.';
@@ -634,9 +758,11 @@
   function hdrezkaSync() {
     if (hdrezkaSyncBusy) return;
     hdrezkaSyncBusy = true;
-    var status = $('#hdrezkaSyncStatus'), button = $('#hdrezkaSyncNow');
-    button.disabled = true;
+    var status = $('#hdrezkaSyncStatus');
+    var buttons = [$('#hdrezkaSyncNow'), $('#quickHdrezkaSync')].filter(Boolean);
+    buttons.forEach(function (button) { button.disabled = true; });
     status.textContent = 'Проверяю авторизацию HDRezka…';
+    message('Проверяю авторизацию HDRezka…', true);
     queryTabs({active:true,currentWindow:true}).then(function(tabs) {
       var tab=tabs && tabs[0];
       if(!tab || !tab.id || !tab.url) throw new Error('Откройте HDRezka в активной вкладке и войдите в свой аккаунт.');
@@ -765,12 +891,17 @@
             var count=(values[0]&&values[0].added||[]).length;
             var msg=result.noFolder?'Папка RANDOM не найдена; локальная база пуста.':'Импортировано в базу '+count+' новых карточек; в папку RANDOM добавлено '+result.added+', уже было '+result.skipped+'; прочитано страниц: '+result.pages+'.';
             if(result.failed&&result.failed.length)msg+=' Ошибки: '+result.failed.slice(0,3).join(' | ');
-            status.textContent=msg;renderDb();
+            status.textContent=msg;renderDb();message(msg);
           });
         });
       });
-    }).catch(function(e) { status.textContent='Синхронизация не выполнена: '+(e.message||'ошибка'); })
-      .finally(function(){hdrezkaSyncBusy=false;button.disabled=false;});
+    }).catch(function(e) {
+      status.textContent='Синхронизация не выполнена: '+(e.message||'ошибка');
+      message(status.textContent);
+    }).finally(function(){
+      hdrezkaSyncBusy=false;
+      buttons.forEach(function (button) { button.disabled=false; });
+    });
   }
 
   function setupSettingsUi() {
@@ -789,6 +920,7 @@
     $('#settingsImportFile').addEventListener('change', function () { importFile(this.files && this.files[0]); });
     $('#githubSyncNow').addEventListener('click', githubSync);
     $('#hdrezkaSyncNow').addEventListener('click', hdrezkaSync);
+    $('#quickHdrezkaSync').addEventListener('click', hdrezkaSync);
     $('#settingsButton').addEventListener('click', function () { $('#domainInput').value = BASE_ORIGIN; $('#settingsPanel').classList.add('active'); loadSyncSettings(); });
   }
 
@@ -816,28 +948,69 @@
   }
 
   $$('.tab').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      $$('.tab').forEach(function (x) { x.classList.remove('active'); });
-      $$('.panel').forEach(function (x) { x.classList.remove('active'); });
-      btn.classList.add('active'); $('#tab-' + btn.dataset.tab).classList.add('active');
-      if (btn.dataset.tab === 'database') renderDb();
+    btn.addEventListener('click', function () { activateTab(btn.dataset.tab, true); });
+  });
+
+  $$('.batch').forEach(function (b) {
+    b.addEventListener('click', function () {
+      setLastBatchSize(Number(b.dataset.size));
+      runRandom('catalog', null, Number(b.dataset.size), $('#catalogType').value);
     });
   });
-
-  $$('.batch').forEach(function (b) { b.addEventListener('click', function () { runRandom('catalog', null, Number(b.dataset.size), $('#catalogType').value); }); });
-  $('#customRandom').addEventListener('click', function () { runRandom('catalog', null, Number($('#customSize').value), $('#catalogType').value); });
+  $('#customRandom').addEventListener('click', function () {
+    var amount = Number($('#customSize').value);
+    setLastBatchSize(amount);
+    runRandom('catalog', null, amount, $('#catalogType').value);
+  });
   $('#detectCatalog').addEventListener('click', function () {
-    if (busy) return; var filter = $('#catalogType').value; setBusy(true); detectCatalogPages(filter).then(function () { message('Найдено для «' + filterLabel(filter) + '»: ' + currentCatalogPages[filter] + ' страниц. Рандом использует ' + (pageCountOverride || currentCatalogPages[filter]) + '.'); }).catch(function (e) { message(e.message || 'Не удалось определить.'); }).finally(function () { setBusy(false); });
+    if (busy) return;
+    var filter = $('#catalogType').value;
+    setBusy(true);
+    detectCatalogPages(filter).then(function () {
+      message('Найдено для «' + filterLabel(filter) + '»: ' + currentCatalogPages[filter] + ' страниц. Рандом использует ' + (pageCountOverride || currentCatalogPages[filter]) + '.');
+    }).catch(function (e) { message(e.message || 'Не удалось определить.'); }).finally(function () { setBusy(false); });
   });
 
-  $$('.yearBatch').forEach(function (b) { b.addEventListener('click', function () { runRandom('year', Number($('#yearSelect').value), Number(b.dataset.size), $('#yearType').value); }); });
-  $('#yearCustomRandom').addEventListener('click', function () { runRandom('year', Number($('#yearSelect').value), Number($('#yearCustomSize').value), $('#yearType').value); });
-  $('#refreshYear').addEventListener('click', function () {
-    if (busy) return; var y = Number($('#yearSelect').value), f = $('#yearType').value; setBusy(true); detectYearPages(y, f, true).then(function () { message('Для ' + y + ' · ' + filterLabel(f) + ': ' + currentYearPages[String(y) + ':' + f] + ' страниц.'); }).catch(function (e) { message(e.message || 'Ошибка.'); }).finally(function () { setBusy(false); });
+  $$('.yearBatch').forEach(function (b) {
+    b.addEventListener('click', function () {
+      setLastBatchSize(Number(b.dataset.size));
+      runRandom('year', Number($('#yearSelect').value), Number(b.dataset.size), $('#yearType').value);
+    });
   });
-  $('#yearSelect').addEventListener('change', function () { currentYear = Number(this.value); currentYearFilter = $('#yearType').value; $('#yearPages').textContent = 'не определено'; });
-  $('#catalogType').addEventListener('change', function () { $('#catalogPages').textContent = currentCatalogPages[this.value] ? String(currentCatalogPages[this.value]) : 'не определено'; });
-  $('#yearType').addEventListener('change', function () { currentYearFilter = this.value; var key = String(Number($('#yearSelect').value)) + ':' + this.value; $('#yearPages').textContent = currentYearPages[key] ? String(currentYearPages[key]) : 'не определено'; });
+  $('#yearCustomRandom').addEventListener('click', function () {
+    var amount = Number($('#yearCustomSize').value);
+    setLastBatchSize(amount);
+    runRandom('year', Number($('#yearSelect').value), amount, $('#yearType').value);
+  });
+  $('#refreshYear').addEventListener('click', function () {
+    if (busy) return;
+    var y = Number($('#yearSelect').value), f = $('#yearType').value;
+    setBusy(true);
+    detectYearPages(y, f, true).then(function () {
+      message('Для ' + y + ' · ' + filterLabel(f) + ': ' + currentYearPages[String(y) + ':' + f] + ' страниц.');
+    }).catch(function (e) { message(e.message || 'Ошибка.'); }).finally(function () { setBusy(false); });
+  });
+  $('#yearSelect').addEventListener('change', function () {
+    currentYear = Number(this.value);
+    currentYearFilter = $('#yearType').value;
+    renderPageCountDisplays();
+    saveUiStateQuietly();
+  });
+  $('#catalogType').addEventListener('change', function () {
+    renderPageCountDisplays();
+    saveUiStateQuietly();
+  });
+  $('#yearType').addEventListener('change', function () {
+    currentYearFilter = this.value;
+    renderPageCountDisplays();
+    saveUiStateQuietly();
+  });
+  $('#dbTypeFilter').addEventListener('change', function () {
+    renderDb();
+    saveUiStateQuietly();
+  });
+  $('#customSize').addEventListener('change', saveUiStateQuietly);
+  $('#yearCustomSize').addEventListener('change', saveUiStateQuietly);
 
   $('#randomFromDb').addEventListener('click', function () {
     loadDb().then(function (db) {
@@ -865,5 +1038,10 @@
   });
   $('#diagnostics').addEventListener('click', diagnostics);
 
-  loadSettings().then(function () { setupSettingsUi(); setupYears(); renderDb(); });
+  loadSettings().then(function () {
+    setupSettingsUi();
+    setupYears();
+    restoreUiState();
+    renderDb();
+  });
 })();
