@@ -518,13 +518,75 @@ public class MainActivity extends Activity {
     void saveLibrary(){prefs.edit().putString("library",library.toString()).putString("used",new JSONArray(usedUrls()).toString()).apply();}
     void setStatus(String s){status.setText(s);}
     void showDatabase(){
-        StringBuilder text=new StringBuilder("В базе: ").append(library.length()).append(" записей\n\n");
-        for(int i=library.length()-1;i>=0;i--){JSONObject x=library.optJSONObject(i);if(x!=null)text.append(x.optString("title","Без названия")).append("\n").append(x.optString("url","")).append("\n\n");}
-        new AlertDialog.Builder(this).setTitle("Моя база").setMessage(text.toString())
-            .setPositiveButton("Случайный из базы",(d,w)->openRandomSaved())
-            .setNeutralButton("Очистить базу",(d,w)->new AlertDialog.Builder(this).setMessage("Удалить всю базу и историю без повторов?")
-                .setNegativeButton("Отмена",null).setPositiveButton("Удалить",(a,b)->{library=new JSONArray();prefs.edit().putString("used","[]").apply();saveLibrary();setStatus("База и история очищены.");}).show())
-            .setNegativeButton("Закрыть",null).show();
+        ArrayList<JSONObject> entries=new ArrayList<>();
+        ArrayList<String> labels=new ArrayList<>();
+        for(int i=library.length()-1;i>=0;i--){
+            JSONObject item=library.optJSONObject(i);
+            if(item==null)continue;
+            entries.add(item);
+            String title=item.optString("title","Без названия");
+            String yearText=item.optString("year","");
+            String url=item.optString("url","");
+            String label=title;
+            if(!yearText.isEmpty())label+=" · "+yearText;
+            if(!url.isEmpty())label+="\\n"+url;
+            labels.add(label);
+        }
+        if(entries.isEmpty())labels.add("База пока пуста.");
+        ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,labels);
+        AlertDialog.Builder builder=new AlertDialog.Builder(this).setTitle("Моя база ("+library.length()+")")
+            .setAdapter(adapter,(dialog,which)->{
+                if(which<0||which>=entries.size())return;
+                String url=entries.get(which).optString("url","");
+                if(!url.isEmpty())openFilm(url);
+            })
+            .setPositiveButton("Случайный из базы",(dialog,which)->openRandomSaved())
+            .setNeutralButton("Очистить базу",(dialog,which)->new AlertDialog.Builder(this).setMessage("Удалить всю базу и историю без повторов?")
+                .setNegativeButton("Отмена",null).setPositiveButton("Удалить",(confirm,button)->{
+                    library=new JSONArray();
+                    prefs.edit().putString("used","[]").apply();
+                    saveLibrary();
+                    setStatus("База и история очищены.");
+                }).show())
+            .setNegativeButton("Закрыть",null);
+        final AlertDialog databaseDialog=builder.create();
+        databaseDialog.setOnShowListener(ignored->databaseDialog.getListView().setOnItemLongClickListener((parent,view,position,id)->{
+            if(position<0||position>=entries.size())return true;
+            JSONObject item=entries.get(position);
+            String title=item.optString("title","Без названия");
+            String url=item.optString("url","");
+            new AlertDialog.Builder(this).setTitle(title)
+                .setItems(new String[]{"Открыть фильм","Удалить из базы"},(actionDialog,action)->{
+                    if(action==0){
+                        databaseDialog.dismiss();
+                        if(!url.isEmpty())openFilm(url);
+                    }else if(action==1){
+                        removeMovieFromDatabase(url);
+                        databaseDialog.dismiss();
+                        showDatabase();
+                    }
+                })
+                .setNegativeButton("Отмена",null).show();
+            return true;
+        }));
+        databaseDialog.show();
+    }
+    void removeMovieFromDatabase(String url){
+        JSONArray remaining=new JSONArray();
+        boolean removed=false;
+        for(int i=0;i<library.length();i++){
+            JSONObject item=library.optJSONObject(i);
+            if(item==null)continue;
+            if(url.equals(item.optString("url",""))){removed=true;continue;}
+            remaining.put(item);
+        }
+        if(!removed){setStatus("Карточка не найдена в базе.");return;}
+        HashSet<String> used=new HashSet<>(usedUrls());
+        used.remove(url);
+        library=remaining;
+        prefs.edit().putString("used",new JSONArray(used).toString()).apply();
+        saveLibrary();
+        setStatus("Карточка удалена из базы. Её можно будет выбрать снова.");
     }
     void openRandomSaved(){
         if(library.length()==0){setStatus("База пуста.");return;}
