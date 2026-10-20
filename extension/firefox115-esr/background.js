@@ -77,7 +77,7 @@
   function genre(filter){ return GENRE[filter]||''; }
   function pageUrl(origin,scope,year,page,filter){
     var g=genre(filter), q=g?'?filter=last&genre='+g:'';
-    if(scope==='year') return origin+'/year/'+year+(page>1?'/page/'+page+'/':'/')+q;
+    if(scope==='year') return origin+'/xfsearch/year/'+year+(page>1?'/page/'+page+'/':'/')+q;
     return origin+(page>1?'/page/'+page+'/':'/')+q;
   }
   function norm(u){try{var x=new URL(u);x.hash='';return x.href.replace(/\/+$/,'/');}catch(e){return String(u||'');}}
@@ -87,47 +87,56 @@
   function usedLoad(){return storageGet(USED_KEY).then(function(x){return Array.isArray(x)?x:[];});}
   function usedSave(urls){var o={};o[USED_KEY]=Array.from(new Set((urls||[]).map(norm).filter(Boolean)));return storageSet(o);}
   function addUnique(movies){return dbLoad().then(function(db){var map=Object.create(null);db.forEach(function(m){map[norm(m.url)]=1;});var added=[];movies.forEach(function(m){var u=norm(m.url);if(!u||map[u])return;m.url=u;m.id=u;m.addedAt=new Date().toISOString();db.push(m);map[u]=1;added.push(m);});return dbSave(db).then(function(){return {db:db,added:added};});});}
-  function pageCount(origin,scope,year,filter,override){
-    if(scope==='catalog'&&override>0)return Promise.resolve(Math.min(100000,override));
-    var first=pageUrl(origin,scope,year,1,filter), seen=Object.create(null);
-    function numberOf(url){var m=String(url||'').match(/\/page\/(\d+)\/?(?:\?.*)?$/);return m?Number(m[1]):1;}
-    function walk(url,r,guard){
-      var p=r&&r.pagination||{}, max=Math.max(Number(p.max)||1,Number(p.last?numberOf(p.last):1)||1), current=Number(p.current||numberOf(url)||1)||1;
-      if(max>current)return Promise.resolve(max);
-      var next=p.next&&/^https?:\/\//i.test(p.next)?p.next:'';
-      if(next&&guard<120&&!seen[next]&&next!==url){seen[next]=1;return parseInternal(next).then(function(nr){return walk(next,nr,guard+1);});}
-      return Promise.resolve(max);
+  function taskProgress(taskId, phase, detail, done, total) {
+    send({type:'REZKERY_TASK_PROGRESS',taskId:taskId,progress:{
+      phase:phase,detail:detail||'',done:Number(done)||0,total:Number(total)||0
+    }});
+  }
+
+  function pageCount(origin,scope,year,filter,override,taskId,count){
+    if(scope==='catalog'&&override>0){
+      taskProgress(taskId,'Использую заданное число страниц','В настройках задано '+override+' страниц каталога.',0,count);
+      return Promise.resolve(Math.min(100000,override));
     }
-    return parseInternal(first).then(function(r){seen[first]=1;return walk(first,r,0);});
-  }
-  function parseInternal(url){
-    var id='bg'+Date.now()+'_'+Math.random().toString(36).slice(2);
-    return new Promise(function(resolve,reject){
-      var timer=setTimeout(function(){delete parseJobsByRequest[id];reject(new Error('Тайм-аут чтения страницы.'));},30000);
-      parseJobsByRequest[id]={resolve:function(r){clearTimeout(timer);delete parseJobsByRequest[id];resolve(r);},reject:function(e){clearTimeout(timer);delete parseJobsByRequest[id];reject(e);}};
-      startParse(id,url);
+    taskProgress(taskId,'Определяю количество страниц','Читаю пагинацию выбранного каталога.',0,count);
+    var first=pageUrl(origin,scope,year,1,filter);
+    return parseInternal(first).then(function(r){
+      if(!r||!Array.isArray(r.cards)||!r.cards.length) throw new Error('Не удалось прочитать карточки каталога. Проверьте доступ к выбранному домену.');
+      var p=r.pagination||{}, max=Number(p.max)||1;
+      if(!p.exact||max<1){
+        var label=scope==='year'?'за выбранный год':'в каталоге';
+        throw new Error('Не удалось определить последнюю страницу '+label+'. Проверьте домен или укажите число страниц каталога в настройках.');
+      }
+      return max;
     });
-  }
-  var parseJobsByRequest=Object.create(null);
-  function runRandomTask(taskId,msg){
+  }  function runRandomTask(taskId,msg){
     if(runningTasks[taskId]) return Promise.resolve(); runningTasks[taskId]=true;
     var count=Math.max(1,Math.min(30,Number(msg.count)||1)),filter=msg.filter||'all',scope=msg.scope||'catalog',year=Number(msg.year)||null;
+    taskProgress(taskId,'Запускаю подбор карточек','Подготавливаю запрос к каталогу.',0,count);
     return getSettings().then(function(settings){
       var origin=settings.domain;
-      return pageCount(origin,scope,year,filter,settings.pageCountOverride).then(function(pages){
+      return pageCount(origin,scope,year,filter,settings.pageCountOverride,taskId,count).then(function(pages){
+        taskProgress(taskId,'Пагинация определена','Всего страниц: '+pages+'. Подбираю карточки без повторов.',0,count);
         return Promise.all([dbLoad(),usedLoad()]).then(function(values){
           var db=values[0],used=Object.create(null);db.forEach(function(m){used[norm(m.url)]=1;});values[1].forEach(function(u){used[norm(u)]=1;});var picks=[];
           function one(attempt){
             if(picks.length>=count)return Promise.resolve();
             if(attempt>80)return Promise.reject(new Error('Не удалось найти достаточно новых карточек. Возможно, выбранный тип уже почти весь есть в базе.'));
             var p=rand(pages)+1;
+            taskProgress(taskId,'Подбираю карточку '+(picks.length+1)+' из '+count,'Просматриваю страницу '+p+' из '+pages+'.',picks.length,count);
             return parseInternal(pageUrl(origin,scope,year,p,filter)).then(function(r){
               var cards=(r&&r.cards)||[];cards=cards.filter(function(m){return m.url&&!used[norm(m.url)]&&(filter==='all'||m.type===filter);});
-              if(!cards.length)return one(attempt+1);
+              if(!cards.length){
+                taskProgress(taskId,'Ищу свободную карточку','На странице '+p+' новых карточек нет; выбираю другую страницу.',picks.length,count);
+                return one(attempt+1);
+              }
               var m=cards[rand(cards.length)];used[norm(m.url)]=1;picks.push(m);return one(0);
             });
           }
-          return one(0).then(function(){return addUnique(picks).then(function(){picks.forEach(function(m){used[norm(m.url)]=1;});return usedSave(Object.keys(used)).then(function(){return Promise.all(picks.map(function(m){return createTab(m.url,false);})).then(function(){return picks;});});});});
+          return one(0).then(function(){
+            taskProgress(taskId,'Сохраняю выбранные карточки','Добавляю карточки в локальную базу и отмечаю их как уже выбранные.',picks.length,count);
+            return addUnique(picks).then(function(){picks.forEach(function(m){used[norm(m.url)]=1;});return usedSave(Object.keys(used)).then(function(){return Promise.all(picks.map(function(m){return createTab(m.url,false);})).then(function(){return picks;});});});
+          });
         });
       });
     }).then(function(picks){send({type:'REZKERY_TASK_RESULT',taskId:taskId,ok:true,picks:picks});}).catch(function(e){send({type:'REZKERY_TASK_RESULT',taskId:taskId,ok:false,error:e.message||'Ошибка.'});}).then(function(){delete runningTasks[taskId];});
