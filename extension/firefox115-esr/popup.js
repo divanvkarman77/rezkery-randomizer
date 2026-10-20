@@ -302,7 +302,7 @@
     var suffix = genre ? '?filter=last&genre=' + genre : '';
     if (scope === 'year') {
       var host = new URL(BASE_ORIGIN).hostname.toLowerCase();
-      var legacyYearRoutes = /(^|\\.)rezkery\\.com$/.test(host);
+      var legacyYearRoutes = /(^|\.)rezkery\.com$/.test(host);
       var path = !legacyYearRoutes && filter === 'film'
         ? '/films/best/foreign/' + year
         : !legacyYearRoutes && filter === 'series'
