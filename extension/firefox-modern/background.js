@@ -77,7 +77,15 @@
   function genre(filter){ return GENRE[filter]||''; }
   function pageUrl(origin,scope,year,page,filter){
     var g=genre(filter), q=g?'?filter=last&genre='+g:'';
-    if(scope==='year') return origin+'/xfsearch/year/'+year+(page>1?'/page/'+page+'/':'/')+q;
+    if(scope==='year'){
+      var host=new URL(origin).hostname.toLowerCase();
+      var legacyYearRoutes=/(^|\\.)rezkery\\.com$/.test(host);
+      var path=!legacyYearRoutes&&filter==='film'?'/films/best/foreign/'+year:
+        !legacyYearRoutes&&filter==='series'?'/series/best/'+year:'/year/'+year;
+      var yearUrl=origin+path+(page>1?'/page/'+page:'')+'/';
+      var yearGenre=legacyYearRoutes||(filter!=='all'&&filter!=='film'&&filter!=='series')?g:'';
+      return yearUrl+(yearGenre?'?filter=last&genre='+yearGenre:'');
+    }
     return origin+(page>1?'/page/'+page+'/':'/')+q;
   }
   function norm(u){try{var x=new URL(u);x.hash='';return x.href.replace(/\/+$/,'/');}catch(e){return String(u||'');}}
