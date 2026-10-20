@@ -13,6 +13,7 @@
   var currentYearFilter = 'all';
   var pending = Object.create(null);
   var busy = false;
+  var activeRandomTaskId = null;
   var BASE_ORIGIN = 'https://rezkery.com';
   var DEFAULT_ORIGIN = 'https://rezkery.com';
 
@@ -104,7 +105,13 @@
       var p = message.progress || {};
       $('#hdrezkaSyncStatus').textContent = (p.phase || 'Синхронизация…') + (p.total ? ' — ' + p.done + ' из ' + p.total : '…');
     }
-    if (message.type === 'REZKERY_TASK_RESULT') {
+    if (message.type === 'REZKERY_TASK_PROGRESS' && message.taskId === activeRandomTaskId) {
+      var progress = message.progress || {};
+      showRandomProgress(progress.phase, progress.detail, progress.done, progress.total);
+    }
+    if (message.type === 'REZKERY_TASK_RESULT' && message.taskId === activeRandomTaskId) {
+      activeRandomTaskId = null;
+      hideRandomProgress();
       if (message.ok) {
         setBusy(false);
         var picks = message.picks || [];
@@ -294,7 +301,7 @@
     var genre = genreForFilter(filter);
     var suffix = genre ? '?filter=last&genre=' + genre : '';
     if (scope === 'year') {
-      return BASE_ORIGIN + '/year/' + year + (page > 1 ? '/page/' + page + '/' : '/') + suffix;
+      return BASE_ORIGIN + '/xfsearch/year/' + year + (page > 1 ? '/page/' + page + '/' : '/') + suffix;
     }
     return BASE_ORIGIN + (page > 1 ? '/page/' + page + '/' : '/') + suffix;
   }
@@ -351,18 +358,23 @@
       return Promise.resolve(currentCatalogPages[filter]);
     }
     $('#catalogPages').textContent = 'определяю…';
+    message('Проверяю пагинацию каталога…', true);
     var url = catalogStartUrl(filter);
     return parsePageViaTab(url, 30000).then(function (result) {
       if (!result || !result.cards || result.cards.length < 1) {
         throw new Error('Не удалось найти карточки в режиме «' + filterLabel(filter) + '». Проверьте доступ к выбранному домену.');
       }
-      var max = result.pagination ? Number(result.pagination.max) || 1 : 1;
-      if (!(result.pagination && result.pagination.exact) || max < 2) {
-        throw new Error('Не удалось прочитать ссылку на последнюю страницу. Укажи её номер в настройках (например, 2540), чтобы рандом выбирал по всему каталогу.');
+      var pagination = result.pagination || {};
+      var max = Number(pagination.max) || 1;
+      if (!pagination.exact || max < 2) {
+        throw new Error('Сайт не показал последнюю страницу каталога. Можно указать её число в настройках.');
       }
       currentCatalogPages[filter] = max;
       $('#catalogPages').textContent = String(max) + (pageCountOverride ? ' · рандом: ' + pageCountOverride : '');
       return max;
+    }).catch(function (e) {
+      $('#catalogPages').textContent = 'не определено';
+      throw e;
     });
   }
 
@@ -380,42 +392,23 @@
     $('#yearPages').textContent = 'определяю…';
     $('#yearPageStatus').textContent = 'Читаю пагинацию ' + year + ' · ' + filterLabel(filter) + '…';
     var firstUrl = pageUrl('year', year, 1, filter);
-    var seen = Object.create(null);
-
-    function pageNumberFromUrl(url) {
-      var m = String(url || '').match(/\/page\/(\d+)\/?(?:\?.*)?$/);
-      return m ? Number(m[1]) : 1;
-    }
-
-    function walk(url, result, guard) {
-      guard = guard || 0;
-      var p = result && result.pagination ? result.pagination : {};
-      var max = Math.max(Number(p.max) || 1, Number(p.last ? pageNumberFromUrl(p.last) : 1) || 1);
-      var current = Number(p.current || pageNumberFromUrl(url) || 1) || 1;
-      if (max > current) return Promise.resolve(max);
-      var next = ''; try { if (p.next && new URL(p.next).host === new URL(BASE_ORIGIN).host && /^https?:$/i.test(new URL(p.next).protocol)) next = p.next; } catch (e) {}
-      if (next && guard < 120 && !seen[next] && next !== url) {
-        seen[next] = 1;
-        $('#yearPageStatus').textContent = 'Проверяю следующую страницу ' + (current + 1) + '…';
-        return parsePageViaTab(next, 30000).then(function (r) { return walk(next, r, guard + 1); });
-      }
-      return Promise.resolve(max);
-    }
 
     return parsePageViaTab(firstUrl, 30000).then(function (result) {
       if (!result || !result.cards || result.cards.length < 1) {
         throw new Error('На странице года не найдены карточки для «' + filterLabel(filter) + '».');
       }
-      seen[firstUrl] = 1;
-      return walk(firstUrl, result, 0);
-    }).then(function (max) {
-      currentYearPages[cacheKey] = Math.max(1, Number(max) || 1);
-      $('#yearPages').textContent = String(currentYearPages[cacheKey]);
+      var pagination = result.pagination || {};
+      var max = Number(pagination.max) || 1;
+      if (!pagination.exact || max < 1) {
+        throw new Error('Сайт не сообщил количество страниц за ' + year + '.');
+      }
+      currentYearPages[cacheKey] = max;
+      $('#yearPages').textContent = String(max);
       $('#yearPageStatus').textContent = 'Определено по пагинации ' + year + ' · ' + filterLabel(filter) + '.';
-      return currentYearPages[cacheKey];
+      return max;
     }).catch(function (e) {
-      $('#yearPages').textContent = 'ошибка';
-      $('#yearPageStatus').textContent = e.message || 'Ошибка чтения страницы.';
+      $('#yearPages').textContent = 'не определено';
+      $('#yearPageStatus').textContent = e.message || 'Не удалось прочитать пагинацию.';
       throw e;
     });
   }
@@ -442,14 +435,45 @@
     return next();
   }
 
+  function showRandomProgress(phase, detail, done, total) {
+    var box = $('#randomProgress');
+    box.hidden = false;
+    $('#randomProgressTitle').textContent = phase || 'Подбор карточек…';
+    $('#randomProgressDetail').textContent = detail || '';
+    var fill = $('#randomProgressFill');
+    var count = $('#randomProgressCount');
+    var n = Number(done) || 0, max = Number(total) || 0;
+    if (max > 0) {
+      fill.style.width = Math.max(0, Math.min(100, n / max * 100)) + '%';
+      fill.classList.remove('indeterminate');
+      count.textContent = n + ' из ' + max;
+    } else {
+      fill.style.width = '34%';
+      fill.classList.add('indeterminate');
+      count.textContent = '';
+    }
+  }
+
+  function hideRandomProgress() {
+    $('#randomProgress').hidden = true;
+    $('#randomProgressFill').classList.remove('indeterminate');
+  }
+
   function runRandom(scope, year, count, filter) {
     if (busy) return;
     count = Math.max(1, Math.min(30, Number(count) || 1));
     filter = filter || 'all';
     setBusy(true);
     var taskId = 't' + Date.now() + '_' + Math.random().toString(36).slice(2);
-    message('Фоновый рандом: подбираю ' + count + '…', true);
-    sendRuntime({ type: 'REZKERY_RUN_RANDOM', taskId: taskId, scope: scope, year: year, count: count, filter: filter }).catch(function(e){ setBusy(false); message(e.message || 'Не удалось запустить фоновую задачу.'); });
+    activeRandomTaskId = taskId;
+    showRandomProgress('Запускаю подбор…', 'Проверяю доступность каталога и пагинацию.', 0, count);
+    message('Рандом: проверяю каталог…', true);
+    sendRuntime({ type: 'REZKERY_RUN_RANDOM', taskId: taskId, scope: scope, year: year, count: count, filter: filter }).catch(function(e) {
+      activeRandomTaskId = null;
+      hideRandomProgress();
+      setBusy(false);
+      message(e.message || 'Не удалось запустить фоновую задачу.');
+    });
   }
 
   function plural(n, one, few, many) {
