@@ -21,7 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class MainActivity extends Activity {
-    EditText domain, year, count, simpleCount;
+    EditText domain, year, count, simpleCount, pageCountOverride;
     CheckBox avoidSameYear, autoSyncBookmarks;
     AutoCompleteTextView yearDropdown;
     Button yearMinus, yearPlus, yearDropdownButton, hdrezkaSyncButton, settingsButton;
@@ -67,7 +67,7 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle b){
         super.onCreate(b); setContentView(R.layout.activity_main);
         prefs=getSharedPreferences("rzk",0);
-        domain=findViewById(R.id.domain); year=findViewById(R.id.year); count=findViewById(R.id.count); simpleCount=findViewById(R.id.simpleCount); avoidSameYear=findViewById(R.id.avoidSameYear); autoSyncBookmarks=findViewById(R.id.autoSyncBookmarks); type=findViewById(R.id.type);
+        domain=findViewById(R.id.domain); year=findViewById(R.id.year); count=findViewById(R.id.count); simpleCount=findViewById(R.id.simpleCount); pageCountOverride=findViewById(R.id.catalogPageCount); avoidSameYear=findViewById(R.id.avoidSameYear); autoSyncBookmarks=findViewById(R.id.autoSyncBookmarks); type=findViewById(R.id.type);
         status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); title=findViewById(R.id.title); web=findViewById(R.id.web);
         yearDropdown=findViewById(R.id.year); yearMinus=findViewById(R.id.yearMinus); yearPlus=findViewById(R.id.yearPlus); yearDropdownButton=findViewById(R.id.yearDropdownButton);
         hdrezkaSyncButton=findViewById(R.id.hdrezkaSync); settingsButton=findViewById(R.id.settings);
@@ -82,7 +82,7 @@ public class MainActivity extends Activity {
         importHtmlButton=findViewById(R.id.importHtml); driveExportButton=findViewById(R.id.driveExport);
         driveImportButton=findViewById(R.id.driveImport); githubButton=findViewById(R.id.githubSync);
         domain.setText(prefs.getString("domainAdvanced",prefs.getString("domain","https://rezkery.com")));
-        simpleCount.setText(prefs.getString("simpleCount","1"));
+        simpleCount.setText(prefs.getString("simpleCount","1")); pageCountOverride.setText(prefs.getString("catalogPageCountOverride","0"));
         avoidSameYear.setChecked(prefs.getBoolean("avoidSameYear",false));
         avoidSameYear.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("avoidSameYear",checked).apply());
         autoSyncBookmarks.setChecked(prefs.getBoolean("autoSyncBookmarks",false));
@@ -102,7 +102,7 @@ public class MainActivity extends Activity {
         yearDropdown.setOnClickListener(v->yearDropdown.showDropDown());
         yearDropdownButton.setOnClickListener(v->{yearDropdown.requestFocus();yearDropdown.showDropDown();});
         yearMinus.setOnClickListener(v->adjustYear(-1)); yearPlus.setOnClickListener(v->adjustYear(1));
-        domain.addTextChangedListener(simpleWatcher("domainAdvanced")); year.addTextChangedListener(simpleWatcher("yearAdvanced")); count.addTextChangedListener(simpleWatcher("countAdvanced")); simpleCount.addTextChangedListener(simpleWatcher("simpleCount"));
+        domain.addTextChangedListener(simpleWatcher("domainAdvanced")); year.addTextChangedListener(simpleWatcher("yearAdvanced")); count.addTextChangedListener(simpleWatcher("countAdvanced")); simpleCount.addTextChangedListener(simpleWatcher("simpleCount")); pageCountOverride.addTextChangedListener(simpleWatcher("catalogPageCountOverride"));
         type.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("categoryAdvanced",pos).apply();}public void onNothingSelected(android.widget.AdapterView<?> p){}});
         openMode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
             public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("openMode",pos).apply();}
@@ -142,8 +142,8 @@ public class MainActivity extends Activity {
         LinearLayout root=findViewById(R.id.root);
         root.setBackgroundColor(bg); tintLabels(root,muted);
         title.setTextColor(fg); subtitle.setTextColor(muted); status.setTextColor(muted);
-        domain.setTextColor(fg); year.setTextColor(fg);
-        domain.setHintTextColor(muted); year.setHintTextColor(muted);
+        domain.setTextColor(fg); year.setTextColor(fg); pageCountOverride.setTextColor(fg);
+        domain.setHintTextColor(muted); year.setHintTextColor(muted); pageCountOverride.setHintTextColor(muted);
         int[][] states=new int[][]{new int[]{android.R.attr.state_enabled},new int[]{}};
         int[] colors=new int[]{fg,fg};
         type.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
@@ -251,7 +251,11 @@ public class MainActivity extends Activity {
     String parserScript(){
         return "(function(){var cards=[],seen={};var ns=document.querySelectorAll('.b-content__inline_item');"+
         "for(var i=0;i<ns.length;i++){var n=ns[i],a=n.querySelector('a[href]');if(!a)continue;var u=a.href;if(seen[u])continue;seen[u]=1;var l=n.querySelector('.b-content__inline_item-link'),years=(n.innerText||'').match(/(19|20|21)\\d{2}/g)||[],urlYears=u.match(/(19|20|21)\\d{2}/g)||[],ym=urlYears.length?urlYears[urlYears.length-1]:(years.length?years[years.length-1]:'');cards.push({url:u,title:(l?l.innerText:a.innerText||'Без названия').trim(),year:ym});}"+
-        "var max=1,as=document.querySelectorAll('a[href]');for(var j=0;j<as.length;j++){var h=as[j].href,m=h.match(/\\/page\\/(\\d+)\\/?(?:\\?.*)?$/);if(m)max=Math.max(max,parseInt(m[1],10)||1);}"+
+        "var max=1,as=document.querySelectorAll('a[href]'),path=location.pathname,yearMatch=path.match(/^\\/year\\/(\\d{4})(?:\\/page\\/\\d+)?\\/?$/),yearScope=!!yearMatch,yearValue=yearMatch?yearMatch[1]:'',genre=new URL(location.href).searchParams.get('genre')||'',filter=new URL(location.href).searchParams.get('filter')||'';"+
+        "var pageNumber=function(h){try{var u=new URL(h,location.href),m=u.pathname.match(/\\/page\\/(\\d+)\\/?$/),q=u.searchParams.get('page');return m?parseInt(m[1],10):(q?parseInt(q,10):1)}catch(e){return 1}};"+
+        "for(var j=0;j<as.length;j++){try{var u=new URL(as[j].href,location.href),up=u.pathname,n=pageNumber(u.href),same=u.origin===location.origin&&(u.searchParams.get('genre')||'')===genre&&(!filter||(u.searchParams.get('filter')||'')===filter),match=yearScope?new RegExp('^/year/'+yearValue+'/page/\\\\d+/?$').test(up):/^\\/page\\/\\d+\\/?$/.test(up);if(same&&match)max=Math.max(max,n);var marker=((as[j].getAttribute('rel')||'')+' '+as[j].className+' '+((as[j].parentElement&&as[j].parentElement.className)||'')+' '+as[j].textContent).toLowerCase();if(same&&n>1&&/(last|послед|посл)/i.test(marker))max=Math.max(max,n)}catch(e){}}"+
+        "var nav=document.querySelector('.b-navigation__next'),na=nav&&(nav.closest('a')||nav.parentElement&&nav.parentElement.closest('a')),next=na?na.href:'';"+
+
         "var title=document.title||'',body=document.body?(document.body.innerText||'').slice(0,4000):'',challenge=/anubis|cloudflare|cdn-cgi\\/challenge|challenge-platform|captcha|checking your browser|just a moment|провер(ка|ьте).*человек|подтвердите.*человек/i.test(location.href+' '+title+' '+body)||!!document.querySelector('#challenge-form,.cf-challenge,#anubis_challenge,[data-anubis]');"+
         "return JSON.stringify({cards:cards,max:max,challenge:challenge,title:title});})()";
     }
@@ -272,7 +276,7 @@ public class MainActivity extends Activity {
                     batchNotice="Сайт не вернул карточки каталога. Запросы остановлены, чтобы не нагружать сервер.";
                     pendingPages.clear();finishBatch();return;
                 }
-                pendingMax=Math.max(1,Math.min(max,10000));
+                int manualMax=0;try{manualMax=Integer.parseInt(prefs.getString("catalogPageCountOverride","0"));}catch(Exception ignored){} pendingMax=batchYear.isEmpty()&&manualMax>0?Math.min(manualMax,100000):Math.max(1,Math.min(max,100000));
                 maxPageChecks=Math.min(pendingMax,Math.max(pendingTotal,Math.min(24,pendingTotal*3)));
                 ArrayList<Integer> all=new ArrayList<>(); for(int p=1;p<=pendingMax;p++)all.add(p);
                 Collections.shuffle(all);
@@ -612,6 +616,31 @@ public class MainActivity extends Activity {
             "if(e){const href=e.getAttribute('href');if(href&&!href.startsWith('#')&&!/^javascript:/i.test(href)&&!(/login|auth/i.test(location.href)))location.href=e.href;else e.click();return 'opened';}"+
             "return 'missing';})()";
     }
+    JSONObject jsonFromEvaluate(String value)throws Exception{
+        Object decoded=new JSONTokener(value==null?"":value).nextValue();
+        if(decoded instanceof JSONObject)return (JSONObject)decoded;
+        if(decoded instanceof String)return new JSONObject((String)decoded);
+        throw new JSONException("Ответ WebView ещё не готов или имеет неверный формат.");
+    }
+    void pollLoginResult(WebView target,EditText password,TextView label,CookieManager cookieManager,int attempt){
+        if(attempt>450){label.setText("HDRezka не ответила за 90 секунд. Проверь соединение и зеркало.");return;}
+        target.evaluateJavascript("window.__rzkLoginResult||null",value->{
+            if(value==null||"null".equals(value)){
+                new android.os.Handler(getMainLooper()).postDelayed(()->pollLoginResult(target,password,label,cookieManager,attempt+1),200);
+                return;
+            }
+            try{
+                JSONObject answer=jsonFromEvaluate(value);
+                if(answer.optBoolean("ok")){
+                    cookieManager.flush();password.setText("");
+                    String activeOrigin=originFromUrl(target.getUrl());
+                    if(!activeOrigin.isEmpty())prefs.edit().putString("hdrezkaAuthOrigin",activeOrigin).apply();
+                    label.setText("Вход подтверждён. Теперь можно синхронизировать папку RANDOM.");
+                    target.loadUrl((activeOrigin.isEmpty()?configuredMirrorOrigin():activeOrigin)+"/favorites/");
+                }else label.setText("Вход не подтверждён: "+answer.optString("error","проверь логин и пароль."));
+            }catch(Exception e){label.setText("Не удалось прочитать ответ входа: "+e.getMessage());}
+        });
+    }
     void hdrezkaSyncDialog(){
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);
         int pad=(int)(16*getResources().getDisplayMetrics().density);
@@ -672,6 +701,8 @@ public class MainActivity extends Activity {
                 });
             }
         });
+        int webHeight=(int)(320*getResources().getDisplayMetrics().density);
+        box.addView(loginWeb,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,webHeight));
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(box);
         boolean[] webDestroyed={false},syncRunning={false};
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Вход и закладки HDRezka").setView(scroll)
@@ -703,19 +734,7 @@ public class MainActivity extends Activity {
             if(user.trim().isEmpty()||password.isEmpty()){pageStatus.setText("Введи логин и пароль.");return;}
             if(!loginPageReady[0]){pageStatus.setText("Подожди, пока загрузится страница HDRezka.");return;}
             pageStatus.setText("Проверяю вход…");
-            loginWeb.evaluateJavascript(loginRequestScript(user,password),result->{
-                try{
-                    Object decoded=new JSONTokener(result==null?"":result).nextValue();
-                    JSONObject answer=new JSONObject(String.valueOf(decoded));
-                    if(answer.optBoolean("ok")){
-                        cookieManager.flush();loginPassword.setText("");
-                        String activeOrigin=originFromUrl(loginWeb.getUrl());
-                        if(!activeOrigin.isEmpty())prefs.edit().putString("hdrezkaAuthOrigin",activeOrigin).apply();
-                        pageStatus.setText("Вход подтверждён. Теперь можно синхронизировать папку RANDOM.");
-                        loginWeb.loadUrl((activeOrigin.isEmpty()?configuredMirrorOrigin():activeOrigin)+"/favorites/");
-                    }else pageStatus.setText("Вход не подтверждён: "+answer.optString("error","проверь логин и пароль."));
-                }catch(Exception e){pageStatus.setText("Не удалось прочитать ответ входа: "+e.getMessage());}
-            });
+            loginWeb.evaluateJavascript(loginRequestScript(user,password),ignored->pollLoginResult(loginWeb,loginPassword,pageStatus,cookieManager,0));
         });
         dialog.show();
         int maxHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.84);
@@ -737,17 +756,17 @@ public class MainActivity extends Activity {
     String loginRequestScript(String username,String password){
         String user=JSONObject.quote(username),pass=JSONObject.quote(password);
         int pause=Math.max(1000,prefs.getInt("requestIntervalSeconds",2)*1000);
-        return "(async function(){try{const body=new URLSearchParams({login_name:"+user+",login_password:"+pass+",login_not_save:'0'});"+
+        return "window.__rzkLoginResult=null;(async function(){try{const body=new URLSearchParams({login_name:"+user+",login_password:"+pass+",login_not_save:'0'});"+
             "const r=await fetch(new URL('/ajax/login/',location.origin),{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:body.toString()});"+
-            "const t=await r.text();let j={};try{j=JSON.parse(t)}catch(e){}if(!r.ok||j.success===false)return JSON.stringify({ok:false,error:j.message||('HTTP '+r.status)});"+
+            "const t=await r.text();let parsed;try{parsed=JSON.parse(t)}catch(e){}const j=parsed&&typeof parsed==='object'?parsed:{};if(!r.ok||j.success===false)return JSON.stringify({ok:false,error:j.message||('HTTP '+r.status)});"+
             "await new Promise(resolve=>setTimeout(resolve,"+pause+"));const f=await fetch(new URL('/favorites/',location.origin),{credentials:'include',redirect:'follow'});const h=await f.text();"+
-            "const ok=(j.success===true||/b-favorites_content__cats_list_link/.test(h))&&!/(Войти в аккаунт|Вход в аккаунт)/i.test(h);"+
+            "const ok=(j.success===true||j.success===1||j.success==='true'||/b-favorites_content__cats_list_link/.test(h))&&!/(Войти в аккаунт|Вход в аккаунт)/i.test(h);"+
             "return JSON.stringify({ok:ok,error:ok?'':'HDRezka не подтвердила авторизацию; проверь логин, пароль и адрес зеркала.'})"+
-            "}catch(e){return JSON.stringify({ok:false,error:String(e.message||e)})}})()";
+            "}catch(e){return JSON.stringify({ok:false,error:String(e.message||e)})}})().then(function(value){window.__rzkLoginResult=value});true";
     }
     String buildHdrezkaSyncScript(boolean upload,JSONArray movies,int delayMs,boolean useCurrentPage){
         String movieJson=movies==null?"[]":movies.toString();
-        return "(async function(){const P=window.__rzkSyncProgress={phase:'Подготовка',done:0,total:0};try{const movies="+movieJson+";"+
+        return "window.__rzkSyncResult=null;(async function(){const P=window.__rzkSyncProgress={phase:'Подготовка',done:0,total:0};try{const movies="+movieJson+";"+
             "const wait=ms=>new Promise(r=>setTimeout(r,ms));let lastRequest="+(useCurrentPage?"Date.now()":"0")+";"+
             "const rate=async()=>{if(lastRequest){const left="+Math.max(1000,delayMs)+"-(Date.now()-lastRequest);if(left>0)await wait(left)}lastRequest=Date.now()};"+
             "const get=async u=>{await rate();const r=await fetch(u,{credentials:'include',redirect:'follow'});if(!r.ok)throw new Error('HTTP '+r.status);const t=await r.text();if(/anubis|cloudflare|cdn-cgi\\/challenge|captcha|checking your browser|just a moment|проверте.*человек/i.test(t))throw new Error('HDRezka показала проверку защиты. Запросы остановлены; пройди проверку вручную.');return t};"+
@@ -763,7 +782,7 @@ public class MainActivity extends Activity {
             "const imported=Array.from(items.values()),ids=new Set(),urls=new Set();const postId=u=>{try{const p=new URL(u).pathname,m=p.match(/(?:^|\\/)(\\d+)-[^/]+\\.html?$/i)||p.match(/(?:^|\\/)(\\d+)(?:\\/|$)/);return m?m[1]:''}catch(e){return''}};imported.forEach(x=>{urls.add(x.url);const id=postId(x.url);if(id)ids.add(id)});"+
             "let added=0,skipped=0,failed=[];if("+upload+"){P.phase='Добавляю отсутствующие карточки';P.done=0;P.total=movies.length;for(let i=0;i<movies.length;i++){const m=movies[i],id=postId(m.url||'');P.done=i+1;if(!m.url||!id){failed.push((m.title||m.url||'карточка')+': не удалось определить ссылку или ID');continue}if(urls.has(m.url)||ids.has(id)){skipped++;continue}try{await post({action:'add_post',post_id:id,cat_id:cat});urls.add(m.url);ids.add(id);added++}catch(e){failed.push((m.title||id)+': '+e.message)}}"+
             "return JSON.stringify({ok:true,noFolder:false,items:imported,added:added,skipped:skipped,failed:failed})"+
-            "}catch(e){return JSON.stringify({ok:false,error:String(e.message||e)})}})()";
+            "}catch(e){return JSON.stringify({ok:false,error:String(e.message||e)})}})().then(function(value){window.__rzkSyncResult=value});true";
     }
     void pollHdrezkaProgress(WebView target,TextView label,ProgressBar bar,boolean[] active){
         if(!active[0])return;
@@ -780,26 +799,17 @@ public class MainActivity extends Activity {
             new android.os.Handler(getMainLooper()).postDelayed(()->pollHdrezkaProgress(target,label,bar,active),500);
         });
     }
-    void startHdrezkaSync(WebView target,AlertDialog dialog,TextView label,ProgressBar bar,boolean[] active,boolean upload){
-        long cooldownUntil=prefs.getLong("protectionCooldownUntil",0L);
-        if(System.currentTimeMillis()<cooldownUntil){
-            long left=Math.max(1,(cooldownUntil-System.currentTimeMillis()+59999L)/60000L);
-            label.setText("Пауза после проверки защиты — ещё примерно "+left+" мин.");
-            bar.setVisibility(View.GONE);active[0]=false;return;
-        }
-        JSONArray movies=new JSONArray();
-        if(upload)for(int i=0;i<library.length();i++){
-            JSONObject item=library.optJSONObject(i);
-            if(item!=null)try{JSONObject movie=new JSONObject();movie.put("url",item.optString("url",""));movie.put("title",item.optString("title",""));movies.put(movie);}catch(Exception ignored){}
-        }
-        int delay=Math.max(1,prefs.getInt("requestIntervalSeconds",2))*1000;
-        String script=buildHdrezkaSyncScript(upload,movies,delay,false);
-        pollHdrezkaProgress(target,label,bar,active);
-        target.evaluateJavascript(script,value->{
+    void pollHdrezkaSyncResult(WebView target,TextView label,ProgressBar bar,boolean[] active,int attempt){
+        if(!active[0])return;
+        if(attempt>1800){active[0]=false;bar.setIndeterminate(false);label.setText("Синхронизация остановлена по тайм-ауту.");return;}
+        target.evaluateJavascript("window.__rzkSyncResult||null",value->{
+            if(!active[0])return;
+            if(value==null||"null".equals(value)){
+                new android.os.Handler(getMainLooper()).postDelayed(()->pollHdrezkaSyncResult(target,label,bar,active,attempt+1),500);return;
+            }
             active[0]=false;bar.setIndeterminate(false);
             try{
-                Object decoded=new JSONTokener(value==null?"":value).nextValue();
-                JSONObject result=new JSONObject(String.valueOf(decoded));
+                JSONObject result=jsonFromEvaluate(value);
                 if(!result.optBoolean("ok")){
                     String error=result.optString("error","не удалось выполнить синхронизацию.");
                     if(error.contains("проверку защиты")){
@@ -818,6 +828,52 @@ public class MainActivity extends Activity {
             }catch(Exception e){label.setText("Не удалось прочитать ответ HDRezka: "+e.getMessage());}
         });
     }
+    void startHdrezkaSync(WebView target,AlertDialog dialog,TextView label,ProgressBar bar,boolean[] active,boolean upload){
+        long cooldownUntil=prefs.getLong("protectionCooldownUntil",0L);
+        if(System.currentTimeMillis()<cooldownUntil){
+            long left=Math.max(1,(cooldownUntil-System.currentTimeMillis()+59999L)/60000L);
+            label.setText("Пауза после проверки защиты — ещё примерно "+left+" мин.");
+            bar.setVisibility(View.GONE);active[0]=false;return;
+        }
+        JSONArray movies=new JSONArray();
+        if(upload)for(int i=0;i<library.length();i++){
+            JSONObject item=library.optJSONObject(i);
+            if(item!=null)try{JSONObject movie=new JSONObject();movie.put("url",item.optString("url",""));movie.put("title",item.optString("title",""));movies.put(movie);}catch(Exception ignored){}
+        }
+        int delay=Math.max(1,prefs.getInt("requestIntervalSeconds",2))*1000;
+        String script=buildHdrezkaSyncScript(upload,movies,delay,false);
+        pollHdrezkaProgress(target,label,bar,active);
+        target.evaluateJavascript(script,ignored->pollHdrezkaSyncResult(target,label,bar,active,0));
+    }
+    void pollAutoImportResult(WebView target,android.view.ViewGroup root,int attempt){
+        if(attempt>1800){setStatus("Автоимпорт HDRezka остановлен по тайм-ауту.");cleanupAutoImportWeb(target,root);return;}
+        target.evaluateJavascript("window.__rzkSyncResult||null",value->{
+            if(value==null||"null".equals(value)){
+                new android.os.Handler(getMainLooper()).postDelayed(()->pollAutoImportResult(target,root,attempt+1),500);return;
+            }
+            try{
+                JSONObject result=jsonFromEvaluate(value);
+                if(result.optBoolean("ok")){
+                    JSONArray incoming=result.optJSONArray("items");int before=library.length();
+                    if(incoming!=null&&incoming.length()>0)mergeLibrary(incoming);
+                    int added=Math.max(0,library.length()-before);
+                    setStatus(result.optBoolean("noFolder")?"Автоимпорт: папка RANDOM ещё не создана.":"Автоимпорт RANDOM завершён: добавлено в базу "+added+" новых карточек.");
+                }else{
+                    String error=result.optString("error","ошибка чтения закладок.");
+                    if(error.contains("проверку защиты")){
+                        long cooldown=Math.max(1,prefs.getInt("protectionCooldownMinutes",15));
+                        prefs.edit().putLong("protectionCooldownUntil",System.currentTimeMillis()+cooldown*60L*1000L).apply();
+                    }
+                    setStatus("Автоимпорт HDRezka остановлен: "+error);
+                }
+            }catch(Exception e){setStatus("Автоимпорт HDRezka: "+e.getMessage());}
+            finally{cleanupAutoImportWeb(target,root);}
+        });
+    }
+    void cleanupAutoImportWeb(WebView target,android.view.ViewGroup root){
+        if(target.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)target.getParent()).removeView(target);
+        target.stopLoading();target.destroy();
+    }
     void maybeAutoSyncBookmarks(){
         if(!prefs.getBoolean("autoSyncBookmarks",false))return;
         long now=System.currentTimeMillis(),last=prefs.getLong("lastAutoBookmarkSync",0L);
@@ -834,39 +890,18 @@ public class MainActivity extends Activity {
         String ua=syncWeb.getSettings().getUserAgentString();syncWeb.getSettings().setUserAgentString(ua.replace("; wv",""));
         CookieManager cookiesManager=CookieManager.getInstance();cookiesManager.setAcceptCookie(true);
         if(android.os.Build.VERSION.SDK_INT>=21)cookiesManager.setAcceptThirdPartyCookies(syncWeb,true);
-        syncWeb.setVisibility(View.INVISIBLE);
-        root.addView(syncWeb,new LinearLayout.LayoutParams(1,1));
+        syncWeb.setVisibility(View.INVISIBLE);root.addView(syncWeb,new LinearLayout.LayoutParams(1,1));
         boolean[] finished={false};
         syncWeb.setWebViewClient(new WebViewClient(){
             @Override public void onPageFinished(WebView view,String url){
                 if(finished[0])return;finished[0]=true;
                 int delay=Math.max(1,prefs.getInt("requestIntervalSeconds",2))*1000;
                 String script=buildHdrezkaSyncScript(false,new JSONArray(),delay,true);
-                view.evaluateJavascript(script,value->{
-                    try{
-                        Object decoded=new JSONTokener(value==null?"":value).nextValue();
-                        JSONObject result=new JSONObject(String.valueOf(decoded));
-                        if(result.optBoolean("ok")){
-                            JSONArray incoming=result.optJSONArray("items");int before=library.length();
-                            if(incoming!=null&&incoming.length()>0)mergeLibrary(incoming);
-                            int added=Math.max(0,library.length()-before);
-                            setStatus(result.optBoolean("noFolder")?"Автоимпорт: папка RANDOM ещё не создана.":"Автоимпорт RANDOM завершён: добавлено в базу "+added+" новых карточек.");
-                        }else{
-                            String error=result.optString("error","ошибка чтения закладок.");
-                            if(error.contains("проверку защиты")){
-                                long cooldown=Math.max(1,prefs.getInt("protectionCooldownMinutes",15));
-                                prefs.edit().putLong("protectionCooldownUntil",System.currentTimeMillis()+cooldown*60L*1000L).apply();
-                            }
-                            setStatus("Автоимпорт HDRezka остановлен: "+error);
-                        }
-                    }catch(Exception e){setStatus("Автоимпорт HDRezka: "+e.getMessage());}
-                    finally{root.removeView(syncWeb);syncWeb.stopLoading();syncWeb.destroy();}
-                });
+                view.evaluateJavascript(script,ignored->pollAutoImportResult(view,root,0));
             }
         });
         syncWeb.loadUrl(origin+"/favorites/");
     }
-
     void syncGithub(String token,String gistId){
         setStatus("Синхронизация с GitHub…");
         new Thread(()->{HttpURLConnection c=null;try{

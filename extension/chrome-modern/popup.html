@@ -22,6 +22,10 @@
         <input id="domainInput" type="text" placeholder="https://rezka.fi" autocomplete="off">
       </label>
       <div class="hint">Укажите только домен зеркала. Например: <b>rezka.fi</b> или <b>https://rezka.fi</b>. Структура сайта должна быть совместима с Rezkery/HDrezka.</div>
+      <label>Страниц каталога для рандома (0 — автоматически)
+        <input id="pageCountOverride" type="number" min="0" max="100000" step="1" value="0">
+      </label>
+      <div class="hint">Если сайт не показывает последнюю страницу в пагинации, укажи её число вручную, например 2540. После изменения нажми «Сохранить».</div>
       <div class="settings-actions"><button class="primary" id="settingsSave">Сохранить</button><button class="secondary" id="settingsReset">По умолчанию</button></div>
       <div class="muted" id="settingsStatus"></div>
       <div class="settings-divider"></div>
@@ -38,8 +42,8 @@
       <div class="muted" id="syncStatus"></div>
       <div class="settings-divider"></div>
       <strong>Закладки HDRezka</strong>
-      <div class="hint">Откройте HDRezka в браузере, войдите в аккаунт и оставьте эту вкладку активной. Расширение использует вашу текущую сессию и добавит карточки из локальной базы в папку RANDOM (создаст её, если нужно). Пароль и cookies не запрашиваются и не сохраняются.</div>
-      <div class="settings-actions"><button class="primary" id="hdrezkaSyncNow">Синхронизировать RANDOM</button></div>
+      <div class="hint">Откройте HDRezka и войдите в аккаунт в этой вкладке. Расширение объединит её папку RANDOM с локальной базой и добавит в папку отсутствующие карточки. Используется сессия браузера; пароль и cookies расширение не читает и не сохраняет. Запросы идут последовательно с паузой, а при проверке защиты синхронизация останавливается.</div>
+      <div class="settings-actions"><button class="primary" id="hdrezkaSyncNow">Импортировать и экспортировать RANDOM</button></div>
       <div class="muted" id="hdrezkaSyncStatus">Нужна активная вкладка HDRezka с авторизацией.</div>
       </section>
 

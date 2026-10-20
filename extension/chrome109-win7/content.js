@@ -234,7 +234,7 @@
     var max = 1;
     var pages = [];
     var yearRe = year ? new RegExp('^/year/' + year + '/page/(\\d+)/?$') : null;
-    var genericRe = /^\/page\/(\\d+)\/?$/;
+    var genericRe = /^\/page\/(\d+)\/?$/;
     var currentGenre = queryValue(location.href, 'genre');
     var currentFilter = queryValue(location.href, 'filter');
 
@@ -260,17 +260,30 @@
       }
     }
 
-    var links = document.querySelectorAll('a[rel="next"], a[rel="last"], .pagination a, .pagenavi a, .navigation a, nav a');
+    var links = document.querySelectorAll('a[rel="next"], a[rel="last"], a.b-navigation__next, a.b-navigation__last, .b-navigation__last a, .b-navigation__pages a, .pagination a, .pagenavi a, .navigation a, nav a, a[aria-label]');
     var nextUrl = '', lastUrl = '';
     for (var j = 0; j < links.length; j++) {
       var rel = (links[j].getAttribute('rel') || '').toLowerCase();
       var href2 = absUrl(links[j].getAttribute('href'));
       if (!inScope(href2)) continue;
-      if (rel.indexOf('next') !== -1) nextUrl = href2 || nextUrl;
-      if (rel.indexOf('last') !== -1) lastUrl = href2 || lastUrl;
       var t = cleanText(links[j].textContent);
-      if (/^(?:следующая|далее|next|›|»|>)$/i.test(t) && href2) nextUrl = href2;
-      if (/^(?:последняя|last|»›|»|>>)$/i.test(t) && href2) lastUrl = href2;
+      var marker = ((links[j].className || '') + ' ' + (links[j].getAttribute('title') || '') + ' ' +
+        (links[j].getAttribute('aria-label') || '') + ' ' +
+        ((links[j].parentElement && links[j].parentElement.className) || '') + ' ' + t).toLowerCase();
+      if (rel.indexOf('next') !== -1 || /\bnext\b|следующ|далее/.test(marker)) nextUrl = href2 || nextUrl;
+      if (rel.indexOf('last') !== -1 || /\blast\b|послед|посл\.?$/.test(marker)) lastUrl = href2 || lastUrl;
+    }
+    var siteNext = document.querySelector('.b-navigation__next');
+    var siteNextAnchor = siteNext && (siteNext.closest('a') || (siteNext.parentElement && siteNext.parentElement.closest('a')));
+    if (siteNextAnchor) {
+      var siteNextUrl = absUrl(siteNextAnchor.getAttribute('href'));
+      if (inScope(siteNextUrl)) nextUrl = siteNextUrl;
+    }
+    var siteLast = document.querySelector('.b-navigation__last');
+    var siteLastAnchor = siteLast && (siteLast.closest('a') || (siteLast.parentElement && siteLast.parentElement.closest('a')));
+    if (siteLastAnchor) {
+      var siteLastUrl = absUrl(siteLastAnchor.getAttribute('href'));
+      if (inScope(siteLastUrl)) lastUrl = siteLastUrl;
     }
     var current = Number((location.pathname.match(/\/page\/(\d+)\/?$/) || [])[1]) || 1;
     if (kind === 'year') {
@@ -278,7 +291,14 @@
       if (ym) current = Number(ym[1]);
     }
     if (current > max) max = current;
-    return { max: max, next: nextUrl, last: lastUrl, pages: pages, current: current, genre: currentGenre, filter: currentFilter };
+    function lastNumber(url) {
+      try {
+        var u = new URL(url), m = u.pathname.match(/\/page\/(\d+)\/?$/), q = u.searchParams.get('page');
+        return m ? Number(m[1]) : (q ? Number(q) : 1);
+      } catch (e) { return 1; }
+    }
+    if (lastUrl) max = Math.max(max, lastNumber(lastUrl));
+    return { max: max, next: nextUrl, last: lastUrl, exact: !!lastUrl, pages: pages, current: current, genre: currentGenre, filter: currentFilter };
   }
 
   function parsePage() {

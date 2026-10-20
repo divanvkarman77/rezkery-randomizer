@@ -77,6 +77,12 @@
                 android:text="ПАУЗА ПОСЛЕ АНТИБОТ-ПРОВЕРКИ" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="8dp" />
             <Spinner android:id="@+id/protectionCooldown" android:layout_width="match_parent" android:layout_height="54dp"
                 android:spinnerMode="dropdown" android:paddingStart="10dp" android:paddingEnd="10dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Страниц каталога для рандома (0 — определить автоматически)" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
+            <EditText android:id="@+id/catalogPageCount" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:hint="0 — автоматически; например 2540" android:inputType="number" android:maxLength="6" android:singleLine="true" android:text="0" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Если пагинация зеркала не показывает последнюю страницу, укажи её номер здесь. Значение используется для общего каталога." android:textColor="#AEB5C1" android:textSize="13sp" />
             <TextView android:id="@+id/domainLabel" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="Домен каталога / зеркало HDRezka" android:textColor="#AEB5C1" android:textStyle="bold" android:layout_marginTop="12dp" />
             <EditText android:id="@+id/domain" android:layout_width="match_parent" android:layout_height="wrap_content"

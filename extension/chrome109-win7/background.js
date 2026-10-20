@@ -7,7 +7,7 @@
   var settingsKey = 'rz_settings_v1';
   var dbKey = 'rz_movies_v1';
   var GENRE = { film:'1', series:'2', cartoon:'3', anime:'82' };
-  var FALLBACK = { all:2530, film:1731, series:520, cartoon:173, anime:107 };
+  var USED_KEY = 'rz_used_v1';
   var LABEL = {all:'Все',film:'Фильмы',series:'Сериалы',cartoon:'Мультфильмы',anime:'Аниме'};
 
   function storageGet(key) {
@@ -73,7 +73,7 @@
     }).catch(function(e){send({type:'REZKERY_PARSE_ERROR',requestId:requestId,error:e.message||'Не удалось открыть страницу.'});});
   }
 
-  function getSettings(){ return storageGet(settingsKey).then(function(s){ return (s&&s.domain)||'https://rezkery.com'; }); }
+  function getSettings(){ return storageGet(settingsKey).then(function(s){ s=s||{}; return {domain:s.domain||'https://rezkery.com',pageCountOverride:Math.max(0,Math.min(100000,parseInt(s.pageCountOverride,10)||0))}; }); }
   function genre(filter){ return GENRE[filter]||''; }
   function pageUrl(origin,scope,year,page,filter){
     var g=genre(filter), q=g?'?filter=last&genre='+g:'';
@@ -84,8 +84,11 @@
   function rand(n){return Math.floor(Math.random()*n);}
   function dbLoad(){return storageGet(dbKey).then(function(x){return Array.isArray(x)?x:[];});}
   function dbSave(db){var o={};o[dbKey]=db;return storageSet(o);}
+  function usedLoad(){return storageGet(USED_KEY).then(function(x){return Array.isArray(x)?x:[];});}
+  function usedSave(urls){var o={};o[USED_KEY]=Array.from(new Set((urls||[]).map(norm).filter(Boolean)));return storageSet(o);}
   function addUnique(movies){return dbLoad().then(function(db){var map=Object.create(null);db.forEach(function(m){map[norm(m.url)]=1;});var added=[];movies.forEach(function(m){var u=norm(m.url);if(!u||map[u])return;m.url=u;m.id=u;m.addedAt=new Date().toISOString();db.push(m);map[u]=1;added.push(m);});return dbSave(db).then(function(){return {db:db,added:added};});});}
-  function pageCount(origin,scope,year,filter){
+  function pageCount(origin,scope,year,filter,override){
+    if(scope==='catalog'&&override>0)return Promise.resolve(Math.min(100000,override));
     var first=pageUrl(origin,scope,year,1,filter), seen=Object.create(null);
     function numberOf(url){var m=String(url||'').match(/\/page\/(\d+)\/?(?:\?.*)?$/);return m?Number(m[1]):1;}
     function walk(url,r,guard){
@@ -95,7 +98,7 @@
       if(next&&guard<120&&!seen[next]&&next!==url){seen[next]=1;return parseInternal(next).then(function(nr){return walk(next,nr,guard+1);});}
       return Promise.resolve(max);
     }
-    return parseInternal(first).then(function(r){var max=Number(r&&r.pagination&&r.pagination.max)||1;if(scope==='catalog'&&max<2)return FALLBACK[filter]||1;seen[first]=1;return walk(first,r,0);});
+    return parseInternal(first).then(function(r){seen[first]=1;return walk(first,r,0);});
   }
   function parseInternal(url){
     var id='bg'+Date.now()+'_'+Math.random().toString(36).slice(2);
@@ -109,10 +112,11 @@
   function runRandomTask(taskId,msg){
     if(runningTasks[taskId]) return Promise.resolve(); runningTasks[taskId]=true;
     var count=Math.max(1,Math.min(30,Number(msg.count)||1)),filter=msg.filter||'all',scope=msg.scope||'catalog',year=Number(msg.year)||null;
-    return getSettings().then(function(origin){
-      return pageCount(origin,scope,year,filter).then(function(pages){
-        return dbLoad().then(function(db){
-          var used=Object.create(null);db.forEach(function(m){used[norm(m.url)]=1;});var picks=[];
+    return getSettings().then(function(settings){
+      var origin=settings.domain;
+      return pageCount(origin,scope,year,filter,settings.pageCountOverride).then(function(pages){
+        return Promise.all([dbLoad(),usedLoad()]).then(function(values){
+          var db=values[0],used=Object.create(null);db.forEach(function(m){used[norm(m.url)]=1;});values[1].forEach(function(u){used[norm(u)]=1;});var picks=[];
           function one(attempt){
             if(picks.length>=count)return Promise.resolve();
             if(attempt>80)return Promise.reject(new Error('Не удалось найти достаточно новых карточек. Возможно, выбранный тип уже почти весь есть в базе.'));
@@ -123,7 +127,7 @@
               var m=cards[rand(cards.length)];used[norm(m.url)]=1;picks.push(m);return one(0);
             });
           }
-          return one(0).then(function(){return addUnique(picks).then(function(){return Promise.all(picks.map(function(m){return createTab(m.url,false);})).then(function(){return picks;});});});
+          return one(0).then(function(){return addUnique(picks).then(function(){picks.forEach(function(m){used[norm(m.url)]=1;});return usedSave(Object.keys(used)).then(function(){return Promise.all(picks.map(function(m){return createTab(m.url,false);})).then(function(){return picks;});});});});
         });
       });
     }).then(function(picks){send({type:'REZKERY_TASK_RESULT',taskId:taskId,ok:true,picks:picks});}).catch(function(e){send({type:'REZKERY_TASK_RESULT',taskId:taskId,ok:false,error:e.message||'Ошибка.'});}).then(function(){delete runningTasks[taskId];});

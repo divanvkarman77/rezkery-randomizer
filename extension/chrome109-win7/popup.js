@@ -4,7 +4,9 @@
   var isFirefox = typeof browser !== 'undefined';
   var API = isFirefox ? browser : chrome;
   var DB_KEY = 'rz_movies_v1';
-  var CATALOG_FALLBACK = 2530;
+  var USED_KEY = 'rz_used_v1';
+  var pageCountOverride = 0;
+  var hdrezkaSyncBusy = false;
   var currentCatalogPages = Object.create(null);
   var currentYearPages = Object.create(null);
   var currentYear = null;
@@ -27,7 +29,6 @@
   // The supplied site pages currently end at these global page numbers;
   // the values are used only as a fallback if the first page exposes no pagination.
   var GENRE_BY_FILTER = { film: '1', series: '2', cartoon: '3', anime: '82' };
-  var CATEGORY_PAGE_FALLBACK = { film: 1731, series: 520, cartoon: 173, anime: 107 };
 
   var $ = function (sel) { return document.querySelector(sel); };
   var $$ = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
@@ -99,6 +100,10 @@
     if (message.type === 'REZKERY_PARSE_ERROR' && pending[message.requestId]) {
       pending[message.requestId].reject(new Error(message.error || 'Ошибка чтения страницы.'));
     }
+    if (message.type === 'REZKERY_HDREZKA_PROGRESS') {
+      var p = message.progress || {};
+      $('#hdrezkaSyncStatus').textContent = (p.phase || 'Синхронизация…') + (p.total ? ' — ' + p.done + ' из ' + p.total : '…');
+    }
     if (message.type === 'REZKERY_TASK_RESULT') {
       if (message.ok) {
         setBusy(false);
@@ -153,18 +158,26 @@
   }
 
   function normalizeMovie(m) {
-    var type = m && m.type;
-    if (!TYPE_LABELS[type]) type = inferTypeFromUrl(m && m.url);
+    m = m || {};
+    var rawUrl = m.url || m.href || m.link || m.uri || '';
+    var rawDate = m.addedAt || m.date || '';
+    var addedAt = rawDate;
+    if (typeof rawDate === 'number' || /^\d{10,13}$/.test(String(rawDate))) {
+      var stamp = Number(rawDate); if (String(Math.floor(stamp)).length <= 10) stamp *= 1000;
+      try { addedAt = new Date(stamp).toISOString(); } catch (e) { addedAt = new Date().toISOString(); }
+    }
+    var type = m.type;
+    if (!TYPE_LABELS[type]) type = inferTypeFromUrl(rawUrl);
     return {
-      id: normalizeUrl(m && m.url),
-      url: normalizeUrl(m && m.url),
-      title: (m && m.title) || 'Без названия',
-      year: (m && m.year) || null,
-      poster: (m && m.poster) || '',
+      id: normalizeUrl(rawUrl),
+      url: normalizeUrl(rawUrl),
+      title: m.title || m.name || 'Без названия',
+      year: m.year || null,
+      poster: m.poster || m.cover || '',
       type: type,
       typeLabel: TYPE_LABELS[type] || TYPE_LABELS.other,
-      sourcePage: (m && m.sourcePage) || '',
-      addedAt: (m && m.addedAt) || new Date().toISOString()
+      sourcePage: m.sourcePage || '',
+      addedAt: addedAt || new Date().toISOString()
     };
   }
 
@@ -175,6 +188,9 @@
     });
   }
   function saveDb(db) { return storageSet((function () { var x = {}; x[DB_KEY] = db; return x; })()); }
+  function loadUsed() { return storageGet(USED_KEY).then(function (x) { return Array.isArray(x) ? x.map(normalizeUrl).filter(Boolean) : []; }); }
+  function saveUsed(urls) { var x = {}; x[USED_KEY] = Array.from(new Set((urls || []).map(normalizeUrl).filter(Boolean))); return storageSet(x); }
+  function mergeUsed(urls) { return loadUsed().then(function (existing) { return saveUsed(existing.concat(urls || [])); }); }
 
   function formatDate(iso) {
     try { return new Date(iso).toLocaleString('ru-RU', { year: 'numeric', month: '2-digit', day: '2-digit' }); }
@@ -296,23 +312,30 @@
 
   function loadSettings() {
     return storageGet('rz_settings_v1').then(function (s) {
-      try { BASE_ORIGIN = normalizeOrigin(s && s.domain || DEFAULT_ORIGIN); } catch (e) { BASE_ORIGIN = DEFAULT_ORIGIN; }
-      return { domain: BASE_ORIGIN };
+      s = s || {};
+      try { BASE_ORIGIN = normalizeOrigin(s.domain || DEFAULT_ORIGIN); } catch (e) { BASE_ORIGIN = DEFAULT_ORIGIN; }
+      pageCountOverride = Math.max(0, Math.min(100000, parseInt(s.pageCountOverride, 10) || 0));
+      return { domain: BASE_ORIGIN, pageCountOverride: pageCountOverride };
     });
   }
 
   function saveSettings() {
     var input = $('#domainInput');
     var origin = normalizeOrigin(input.value);
-    return storageGet('rz_settings_v1').then(function (existing) { existing = existing || {}; existing.domain = origin; return storageSet({ rz_settings_v1: existing }); }).then(function () {
-      BASE_ORIGIN = origin;
-      input.value = BASE_ORIGIN;
-      currentCatalogPages = Object.create(null);
-      currentYearPages = Object.create(null);
-      $('#catalogPages').textContent = 'не определено';
+    var rawCount = clean($('#pageCountOverride').value);
+    var pages = rawCount ? Number(rawCount) : 0;
+    if (!Number.isInteger(pages) || pages < 0 || pages > 100000) throw new Error('Укажи целое число страниц от 0 до 100000.');
+    return storageGet('rz_settings_v1').then(function (existing) {
+      existing = existing || {}; existing.domain = origin; existing.pageCountOverride = pages;
+      return storageSet({ rz_settings_v1: existing });
+    }).then(function () {
+      BASE_ORIGIN = origin; pageCountOverride = pages;
+      input.value = BASE_ORIGIN; $('#pageCountOverride').value = String(pages);
+      currentCatalogPages = Object.create(null); currentYearPages = Object.create(null);
+      $('#catalogPages').textContent = pages ? String(pages) + ' (вручную)' : 'не определено';
       $('#yearPages').textContent = 'не определено';
-      $('#settingsStatus').textContent = 'Сохранено: ' + BASE_ORIGIN;
-      message('Домен сохранён: ' + BASE_ORIGIN);
+      $('#settingsStatus').textContent = 'Сохранено: ' + BASE_ORIGIN + ' · страниц: ' + (pages || 'авто');
+      message('Настройки сохранены.');
     });
   }
 
@@ -334,12 +357,11 @@
         throw new Error('Не удалось найти карточки в режиме «' + filterLabel(filter) + '». Проверьте доступ к выбранному домену.');
       }
       var max = result.pagination ? Number(result.pagination.max) || 1 : 1;
-      if (max < 2) {
-        if (filter === 'all') max = CATALOG_FALLBACK;
-        else max = CATEGORY_PAGE_FALLBACK[filter] || 1;
+      if (!(result.pagination && result.pagination.exact) || max < 2) {
+        throw new Error('Не удалось прочитать ссылку на последнюю страницу. Укажи её номер в настройках (например, 2540), чтобы рандом выбирал по всему каталогу.');
       }
       currentCatalogPages[filter] = max;
-      $('#catalogPages').textContent = String(max);
+      $('#catalogPages').textContent = String(max) + (pageCountOverride ? ' · рандом: ' + pageCountOverride : '');
       return max;
     });
   }
@@ -438,11 +460,12 @@
   }
 
   function exportJson() {
-    loadDb().then(function (db) {
+    Promise.all([loadDb(), loadUsed()]).then(function (values) {
+      var db = values[0], used = Array.from(new Set(values[1].concat(db.map(function (m) { return m.url; }))));
       downloadFile('rezkery-randomizer-' + dateStamp() + '.json', JSON.stringify({
-        format: 'rezkery-randomizer', version: 3, exportedAt: new Date().toISOString(), movies: db
+        format: 'rezkery-randomizer-db', version: 1, exportedAt: new Date().toISOString(), items: db, used: used
       }, null, 2), 'application/json;charset=utf-8');
-      message('JSON экспортирован.');
+      message('JSON экспортирован в совместимом формате.');
     });
   }
 
@@ -478,21 +501,28 @@
     var reader = new FileReader();
     reader.onload = function () {
       try {
-        var text = String(reader.result || ''), imported = [];
+        var text = String(reader.result || ''), imported = [], importedUsed = [];
+        function unpack(data) {
+          if (Array.isArray(data)) return data;
+          if (!data || typeof data !== 'object') return [];
+          importedUsed = Array.isArray(data.used) ? data.used : [];
+          return data.items || data.movies || data.data || data.bookmarks || [];
+        }
         if (/\.json$/i.test(file.name) || (file.type || '').indexOf('json') >= 0) {
-          var data = JSON.parse(text); imported = Array.isArray(data) ? data : (data.movies || []);
+          imported = unpack(JSON.parse(text));
         } else {
           var doc = new DOMParser().parseFromString(text, 'text/html');
-          var script = doc.getElementById('rezkery-data');
-          if (script) imported = JSON.parse(script.textContent || '[]');
+          var script = doc.getElementById('rezkery-data') || doc.getElementById('rezkery-db');
+          if (script) imported = unpack(JSON.parse(script.textContent || '[]'));
           else throw new Error('Это не экспорт Rezkery Randomizer.');
         }
-        imported = imported.filter(function (m) { return m && m.url; }).map(normalizeMovie);
+        imported = imported.filter(function (m) { return m && (m.url || m.href || m.link || m.uri); }).map(normalizeMovie);
         loadDb().then(function (db) {
           var map = Object.create(null); db.forEach(function (m) { map[normalizeUrl(m.url)] = m; });
           var n = 0;
           imported.forEach(function (m) { var u = normalizeUrl(m.url); if (!map[u]) { m.id = u; map[u] = m; db.push(m); n++; } });
-          return saveDb(db).then(function () { message('Импортировано новых: ' + n); renderDb(); });
+          return Promise.all([saveDb(db), mergeUsed(importedUsed.concat(imported.map(function (m) { return m.url; })))])
+            .then(function () { message('Импортировано новых: ' + n + ' · всего в базе: ' + db.length); renderDb(); });
         });
       } catch (e) { message('Импорт: ' + (e.message || 'не удалось разобрать файл.')); }
     };
@@ -507,41 +537,72 @@
       $('#githubGistId').value = s.githubGistId || '';
     });
   }
+
   function githubSync() {
-    var token = clean($('#githubToken').value), gistId = clean($('#githubGistId').value);
+    var token = clean($('#githubToken').value);
+    var gistId = clean($('#githubGistId').value);
     if (!token) { $('#syncStatus').textContent = 'Вставьте GitHub token с разрешением gist.'; return; }
     $('#syncStatus').textContent = 'Синхронизирую…';
     Promise.all([loadDb(), storageGet('rz_settings_v1')]).then(function(values) {
       var local = values[0], settings = values[1] || {};
       function api(url, method, body) {
-        return fetch(url, {method:method,headers:{'Accept':'application/vnd.github+json','Authorization':'Bearer '+token,'X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},body:body?JSON.stringify(body):undefined})
-          .then(function(r){return r.text().then(function(t){var data={};try{data=t?JSON.parse(t):{};}catch(e){}if(!r.ok)throw new Error(data.message||('GitHub API: HTTP '+r.status));return data;});});
-      }
-      function parseMovies(gist) {
-        var file=gist&&gist.files&&(gist.files['rezkery-randomizer.json']||Object.values(gist.files)[0]);
-        if(!file||!file.content)return [];
-        var data=JSON.parse(file.content);return Array.isArray(data)?data:(data.movies||[]);
+        return fetch(url, {
+          method: method,
+          headers: { 'Accept': 'application/vnd.github+json', 'Authorization': 'Bearer ' + token, 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined
+        }).then(function(r) {
+          return r.text().then(function(t) {
+            var data = {}; try { data = t ? JSON.parse(t) : {}; } catch (e) {}
+            if (!r.ok) throw new Error(data.message || ('GitHub API: HTTP ' + r.status));
+            return data;
+          });
+        });
       }
       function merge(remote) {
-        var map=Object.create(null);
-        (remote||[]).concat(local).forEach(function(m){if(!m||!m.url)return;var n=normalizeMovie(m),key=normalizeUrl(n.url);if(key&&(!map[key]||String(n.addedAt)>String(map[key].addedAt)))map[key]=n;});
-        return Object.keys(map).map(function(k){return map[k];});
-      }
-      return (gistId?api('https://api.github.com/gists/'+encodeURIComponent(gistId),'GET'):Promise.resolve(null)).then(function(gist){
-        var merged=merge(gist?parseMovies(gist):[]);
-        var body={description:'Rezkery Randomizer database sync',public:false,files:{'rezkery-randomizer.json':{content:JSON.stringify({format:'rezkery-randomizer',version:3,syncedAt:new Date().toISOString(),movies:merged},null,2)}}};
-        return (gist?api('https://api.github.com/gists/'+encodeURIComponent(gistId),'PATCH',body):api('https://api.github.com/gists','POST',body)).then(function(saved){
-          return saveDb(merged).then(function(){settings.githubToken=token;settings.githubGistId=saved.id||gistId;settings.domain=settings.domain||BASE_ORIGIN;return storageSet({rz_settings_v1:settings}).then(function(){
-            $('#githubGistId').value=settings.githubGistId;$('#syncStatus').textContent='Готово: объединено карточек '+merged.length+'. Gist: '+settings.githubGistId;renderDb();
-          });});
+        var map = Object.create(null);
+        (remote || []).concat(local).forEach(function(m) {
+          if (!m || !m.url) return;
+          var normalized = normalizeMovie(m), key = normalizeUrl(normalized.url);
+          if (!key) return;
+          if (!map[key] || String(normalized.addedAt) > String(map[key].addedAt)) map[key] = normalized;
         });
+        return Object.keys(map).map(function(k) { return map[k]; });
+      }
+      function contentFrom(gist) {
+        var file = gist && gist.files && (gist.files['rezkery-randomizer.json'] || Object.values(gist.files)[0]);
+        if (!file || !file.content) return {items:[],used:[]};
+        var parsed = JSON.parse(file.content);
+        return Array.isArray(parsed) ? {items:parsed,used:[]} : {items:parsed.items || parsed.movies || [],used:parsed.used || []};
+      }
+      var getPromise = gistId ? api('https://api.github.com/gists/' + encodeURIComponent(gistId), 'GET') : Promise.resolve(null);
+      return Promise.all([getPromise,loadUsed()]).then(function(values) {
+        var gist=values[0], remote=gist?contentFrom(gist):{items:[],used:[]}, merged=merge(remote.items);
+        var used=Array.from(new Set(values[1].concat(remote.used||[],merged.map(function(m){return m.url;}))));
+        var fileBody = JSON.stringify({format:'rezkery-randomizer-db',version:1,syncedAt:new Date().toISOString(),items:merged,used:used}, null, 2);
+        var body = {description:'Rezkery Randomizer database sync',public:false,files:{'rezkery-randomizer.json':{content:fileBody}}};
+        return (gist ? api('https://api.github.com/gists/' + encodeURIComponent(gistId), 'PATCH', body) : api('https://api.github.com/gists', 'POST', body))
+          .then(function(saved) {
+            return Promise.all([saveDb(merged),saveUsed(used)]).then(function() {
+              settings.githubToken = token; settings.githubGistId = saved.id || gistId; settings.domain = settings.domain || BASE_ORIGIN;
+              return storageSet({rz_settings_v1:settings}).then(function() {
+                $('#githubGistId').value = settings.githubGistId;
+                $('#syncStatus').textContent = 'Готово: объединено карточек ' + merged.length + '. Gist: ' + settings.githubGistId;
+                renderDb();
+              });
+            });
+          });
       });
-    }).catch(function(e){$('#syncStatus').textContent='Ошибка синхронизации: '+(e.message||'неизвестная ошибка');});
+    }).catch(function(e) {
+      $('#syncStatus').textContent = 'Ошибка синхронизации: ' + (e.message || 'неизвестная ошибка');
+    });
   }
 
 
   function hdrezkaSync() {
-    var status = $('#hdrezkaSyncStatus');
+    if (hdrezkaSyncBusy) return;
+    hdrezkaSyncBusy = true;
+    var status = $('#hdrezkaSyncStatus'), button = $('#hdrezkaSyncNow');
+    button.disabled = true;
     status.textContent = 'Проверяю авторизацию HDRezka…';
     queryTabs({active:true,currentWindow:true}).then(function(tabs) {
       var tab=tabs && tabs[0];
@@ -550,94 +611,145 @@
       try { host = new URL(tab.url).hostname; } catch(e) { throw new Error('Не удалось определить адрес активной вкладки.'); }
       if (!/(rezka|hdrzk)/i.test(host)) throw new Error('Откройте HDRezka (войдите в аккаунт) в активной вкладке и повторите синхронизацию.');
       return loadDb().then(function(db) {
-        if (!db.length) throw new Error('Локальная база пуста — сначала выберите карточки.');
         return API.scripting.executeScript({
           target:{tabId:tab.id},
-          args:[db.map(function(m){return {url:m.url,title:m.title||m.name||''};})],
+          args:[db.map(function(m){return {url:m.url,title:m.title||m.name||'',year:m.year||'',type:m.type||''};})],
           func: async function(movies) {
-            function postId(url) {
-              try {
-                var p = new URL(url).pathname;
-                var m = p.match(/(?:^|\/)(\d+)-[^/]+\.html?$/i) || p.match(/(?:^|\/)(\d+)(?:\/|$)/);
-                return m ? m[1] : '';
-              } catch(e) { return ''; }
+            var api = typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null);
+            var delay=1400,lastRequest=0,visited=Object.create(null);
+            function wait(ms){return new Promise(function(resolve){setTimeout(resolve,ms);});}
+            async function pace(){if(lastRequest){var left=delay-(Date.now()-lastRequest);if(left>0)await wait(left);}lastRequest=Date.now();}
+            function progress(phase,done,total){
+              try{if(api&&api.runtime&&api.runtime.sendMessage){var p=api.runtime.sendMessage({type:'REZKERY_HDREZKA_PROGRESS',progress:{phase:phase,done:done||0,total:total||0}});if(p&&p.catch)p.catch(function(){});}}catch(e){}
             }
-            async function getText(url) {
-              var r = await fetch(url,{credentials:'include',redirect:'follow'});
-              if(!r.ok) throw new Error('HTTP '+r.status+' при чтении '+url);
-              return await r.text();
+            function challenge(text){return /anubis|cloudflare|cdn-cgi\/challenge|captcha|checking your browser|just a moment|провер(ка|ьте).*человек/i.test(text||'');}
+            async function getText(url){
+              await pace();
+              var r=await fetch(url,{credentials:'include',redirect:'follow'}),t=await r.text();
+              if(challenge(t))throw new Error('HDRezka показала проверку защиты. Запросы остановлены; пройди её в браузере и повтори синхронизацию.');
+              if(!r.ok)throw new Error('HDRezka вернула HTTP '+r.status+' при чтении закладок.');
+              return t;
             }
-            async function api(data) {
-              var r = await fetch(new URL('/ajax/favorites/',location.origin).href,{
+            async function apiPost(data){
+              await pace();
+              var r=await fetch(new URL('/ajax/favorites/',location.origin),{
                 method:'POST',credentials:'include',
                 headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},
                 body:new URLSearchParams(data).toString()
               });
-              var t=await r.text(); var j;
-              try { j=JSON.parse(t); } catch(e) { throw new Error('HDRezka вернула не JSON. Возможно, сессия истекла или зеркало изменило API.'); }
-              if(!r.ok || j.success===false) throw new Error(j.message || ('Ошибка закладок HTTP '+r.status));
+              var t=await r.text();
+              if(challenge(t)||r.status===429)throw new Error('HDRezka ограничила запросы или показала проверку защиты. Синхронизация остановлена.');
+              var j;try{j=JSON.parse(t);}catch(e){throw new Error('HDRezka вернула не JSON. Проверь вход в аккаунт.');}
+              if(!r.ok||j.success===false)throw new Error(j.message||('Ошибка закладок HTTP '+r.status));
               return j;
             }
-            var favHtml=await getText(new URL('/favorites/',location.origin).href);
-            if(/name=["'](?:login|email)["']|Войти в аккаунт|Вход в аккаунт/i.test(favHtml) && !/b-favorites_content__cats_list_link/.test(favHtml)) {
-              throw new Error('Не вижу авторизованные закладки. Войдите в HDRezka в этой вкладке и повторите.');
+            function postId(url){
+              try{var p=new URL(url).pathname,m=p.match(/(?:^|\/)(\d+)-[^/]+\.html?$/i);return m?m[1]:'';}catch(e){return '';}
             }
-            var doc=new DOMParser().parseFromString(favHtml,'text/html');
-            var cats=Array.from(doc.querySelectorAll('a.b-favorites_content__cats_list_link'));
-            var cat=null;
-            cats.forEach(function(a){
-              var name=(a.querySelector('.name')||a).textContent.trim();
-              if(name.toLocaleUpperCase() === 'RANDOM') {
-                var m=(a.getAttribute('href')||'').match(/\/favorites\/(\d+)/);
-                if(m) cat=m[1];
+            function parsePage(html){
+              var d=new DOMParser().parseFromString(html,'text/html'),items=[],seen=Object.create(null);
+              d.querySelectorAll('.b-content__inline_item').forEach(function(n){
+                var a=n.querySelector('.b-content__inline_item-link > a[href]')||n.querySelector('a[href]');
+                if(!a)return;
+                var u=new URL(a.getAttribute('href'),location.origin).href;
+                if(seen[u])return;seen[u]=1;
+                var info=n.querySelector('.b-content__inline_item-link'),marker=n.querySelector('.b-content__inline_item-cover .cat, .cat');
+                var cls=marker?String(marker.className||'').toLowerCase():'',ctx=(info?info.textContent:n.textContent)||'';
+                var m=ctx.match(/(?:^|\D)(19\d{2}|20\d{2}|21\d{2})(?:\D|$)/)||u.match(/(?:^|\D)(19\d{2}|20\d{2}|21\d{2})(?:\D|$)/);
+                var type=/\bfilms\b/.test(cls)?'film':(/\bseries\b/.test(cls)?'series':(/\bcartoons\b/.test(cls)?'cartoon':(/\banime\b/.test(cls)?'anime':'other')));
+                var img=n.querySelector('img');
+                items.push({url:u,title:(info?info.textContent:a.textContent||'Без названия').replace(/\s+/g,' ').trim(),year:m?Number(m[1]):null,type:type,poster:img?(img.getAttribute('data-src')||img.getAttribute('src')||''):'',addedAt:new Date().toISOString()});
+              });
+              function pageNo(href){try{var u=new URL(href,location.origin),m=u.pathname.match(/\/page\/(\d+)\/?$/),q=u.searchParams.get('page');return m?Number(m[1]):(q?Number(q):1);}catch(e){return 1;}}
+              var current=pageNo(location.href),next='',last='',max=1;
+              d.querySelectorAll('a[href]').forEach(function(a){
+                var href=new URL(a.getAttribute('href'),location.origin).href,u=new URL(href),n=pageNo(href);
+                if(u.origin!==location.origin||!/^\/favorites\/\d+(?:\/page\/\d+)?\/?$/.test(u.pathname))return;
+                if(n>max)max=n;
+                var marker=((a.getAttribute('rel')||'')+' '+a.className+' '+(a.getAttribute('title')||'')+' '+(a.getAttribute('aria-label')||'')+' '+((a.parentElement&&a.parentElement.className)||'')+' '+a.textContent).toLowerCase();
+                if(/\bnext\b|следующ|далее/.test(marker))next=href;
+                if(/\blast\b|послед|посл\.?$/.test(marker)){last=href;if(n>max)max=n;}
+              });
+              var node=d.querySelector('.b-navigation__next, .b-navigation__last');
+              if(node){var anchor=node.closest('a')||(node.parentElement&&node.parentElement.closest('a'));if(anchor){var marker=(node.className+' '+anchor.className+' '+anchor.textContent).toLowerCase(),href=new URL(anchor.getAttribute('href'),location.origin).href;if(/\blast\b|послед|посл/.test(marker))last=href;else next=href;}}
+              if(last)max=Math.max(max,pageNo(last));
+              return {items:items,current:current,max:max,next:next,last:last};
+            }
+            function findRandom(html){
+              var d=new DOMParser().parseFromString(html,'text/html'),id='';
+              d.querySelectorAll('a.b-favorites_content__cats_list_link').forEach(function(a){
+                var name=(a.querySelector('.name')||a).textContent.trim().toUpperCase(),m=(a.getAttribute('href')||'').match(/\/favorites\/(\d+)/);
+                if(name==='RANDOM'&&m)id=m[1];
+              });
+              return id;
+            }
+            try{
+              progress('Проверяю вход и папку RANDOM',0,0);
+              var home=await getText(new URL('/favorites/',location.origin).href);
+              if(challenge(home))throw new Error('HDRezka показала проверку защиты. Пройди её вручную.');
+              if(!/b-favorites_content__cats_list_link/.test(home)&&/(?:name=["'](?:login|email)|Войти в аккаунт|Вход в аккаунт)/i.test(home))throw new Error('Не вижу авторизованные закладки. Войди в HDRezka в этой вкладке.');
+              var cat=findRandom(home);
+              if(!cat){
+                if(!movies.length)return {ok:true,noFolder:true,items:[],added:0,skipped:0,failed:[],pages:0};
+                progress('Создаю папку RANDOM',0,0);
+                var created=await apiPost({action:'add_cat',name:'RANDOM'});
+                cat=String(created.id||(created.data&&created.data.id)||'');
+                if(!cat)cat=findRandom(await getText(new URL('/favorites/',location.origin).href));
+                if(!cat)throw new Error('Не удалось создать или найти папку RANDOM.');
               }
-            });
-            if(!cat) {
-              var created=await api({action:'add_cat',name:'RANDOM'});
-              cat=String(created.id || (created.data && created.data.id) || '');
-              if(!cat) {
-                var refreshed= new DOMParser().parseFromString(await getText(new URL('/favorites/',location.origin).href),'text/html');
-                Array.from(refreshed.querySelectorAll('a.b-favorites_content__cats_list_link')).forEach(function(a){
-                  var name=(a.querySelector('.name')||a).textContent.trim(), m=(a.getAttribute('href')||'').match(/\/favorites\/(\d+)/);
-                  if(name.toLocaleUpperCase()==='RANDOM'&&m) cat=m[1];
-                });
+              var base=new URL('/favorites/'+cat+'/',location.origin).href;
+              var html=await getText(base),data=parsePage(html),itemsMap=new Map(),ids=new Set(),urls=new Set();
+              data.items.forEach(function(x){itemsMap.set(x.url,x);var id=postId(x.url);if(id)ids.add(id);urls.add(x.url);});
+              var next=data.next,lastPage=data.last?(function(){try{return Number((new URL(data.last)).pathname.match(/\/page\/(\d+)/)?.[1]||1);}catch(e){return 1;}})():0,pages=1;visited[base]=1;
+              progress('Импортирую папку RANDOM',pages,lastPage||data.max);
+              while((next||lastPage>pages)&&pages<500){
+                var target=new URL(next || ('/favorites/'+cat+'/page/'+(pages+1)+'/'),location.origin);
+                if(target.origin!==location.origin||visited[target.href])break;
+                visited[target.href]=1;html=await getText(target.href);data=parsePage(html);pages++;
+                data.items.forEach(function(x){itemsMap.set(x.url,x);var id=postId(x.url);if(id)ids.add(id);urls.add(x.url);});
+                next=data.next;
+                if(data.last){try{lastPage=Number((new URL(data.last)).pathname.match(/\/page\/(\d+)/)?.[1]||lastPage);}catch(e){}}
+                progress('Импортирую папку RANDOM',pages,lastPage||Math.max(pages,data.max));
               }
-              if(!cat) throw new Error('Папка RANDOM не создана или HDRezka не вернула её ID.');
-            }
-            var categoryHtml=await getText(new URL('/favorites/'+cat+'/',location.origin).href);
-            var cdoc=new DOMParser().parseFromString(categoryHtml,'text/html'), existing=Object.create(null);
-            cdoc.querySelectorAll('a[href]').forEach(function(a){var id=postId(a.href);if(id)existing[id]=true;});
-            var added=0, skipped=0, failed=[];
-            for(var i=0;i<movies.length;i++) {
-              var id=postId(movies[i].url);
-              if(!id) {failed.push((movies[i].title||movies[i].url)+': не удалось извлечь ID фильма из URL');continue;}
-              if(existing[id]) {skipped++;continue;}
-              try {
-                await api({action:'add_post',post_id:id,cat_id:cat});
-                existing[id]=true;added++;
-              } catch(e) {failed.push((movies[i].title||id)+': '+(e.message||'ошибка API'));}
-            }
-            return {ok:true,categoryId:cat,added:added,skipped:skipped,failed:failed,processed:movies.length};
+              if((next||lastPage>pages)&&pages>=500)throw new Error('В папке RANDOM более 500 страниц. Остановил импорт, чтобы не выполнять длинную серию запросов.');
+              var imported=Array.from(itemsMap.values()),added=0,skipped=0,failed=[];
+              progress('Добавляю отсутствующие карточки',0,movies.length);
+              for(var i=0;i<movies.length;i++){
+                var movie=movies[i],id=postId(movie.url||'');progress('Добавляю отсутствующие карточки',i+1,movies.length);
+                if(!id){failed.push((movie.title||movie.url||'карточка')+': не удалось определить ID');continue;}
+                if(ids.has(id)){skipped++;continue;}
+                try{await apiPost({action:'add_post',post_id:id,cat_id:cat});ids.add(id);urls.add(movie.url);added++;}
+                catch(e){if(/проверку защиты|ограничила запросы/i.test(e.message||''))throw e;failed.push((movie.title||id)+': '+(e.message||'ошибка API'));}
+              }
+              return {ok:true,noFolder:false,items:imported,added:added,skipped:skipped,failed:failed,pages:pages};
+            }catch(e){return {ok:false,error:String(e.message||e)}}
           }
+        }).then(function(results) {
+          var result=results && results[0] && results[0].result;
+          if(!result || !result.ok) throw new Error(result && result.error || 'HDRezka не вернула результат синхронизации.');
+          var imported=result.items||[];
+          return Promise.all([addMovies(imported),mergeUsed(imported.map(function(m){return m.url;}))]).then(function(values){
+            var count=(values[0]&&values[0].added||[]).length;
+            var msg=result.noFolder?'Папка RANDOM не найдена; локальная база пуста.':'Импортировано в базу '+count+' новых карточек; в папку RANDOM добавлено '+result.added+', уже было '+result.skipped+'; прочитано страниц: '+result.pages+'.';
+            if(result.failed&&result.failed.length)msg+=' Ошибки: '+result.failed.slice(0,3).join(' | ');
+            status.textContent=msg;renderDb();
+          });
         });
-      }).then(function(results) {
-        var result=results && results[0] && results[0].result;
-        if(!result || !result.ok) throw new Error('HDRezka не вернула результат синхронизации.');
-        var msg='RANDOM: добавлено '+result.added+', уже было '+result.skipped+'.';
-        if(result.failed && result.failed.length) msg+=' Ошибки: '+result.failed.slice(0,3).join(' | ');
-        status.textContent=msg;
       });
-    }).catch(function(e) { status.textContent='Синхронизация не выполнена: '+(e.message||'ошибка'); });
+    }).catch(function(e) { status.textContent='Синхронизация не выполнена: '+(e.message||'ошибка'); })
+      .finally(function(){hdrezkaSyncBusy=false;button.disabled=false;});
   }
 
   function setupSettingsUi() {
     $('#domainInput').value = BASE_ORIGIN;
+    $('#pageCountOverride').value = String(pageCountOverride);
     $('#settingsStatus').textContent = 'Текущий домен: ' + BASE_ORIGIN;
     $('#settingsSave').addEventListener('click', function () {
       try { saveSettings().catch(function(e){ $('#settingsStatus').textContent = e.message || 'Ошибка сохранения.'; }); } catch (e) { $('#settingsStatus').textContent = e.message; }
     });
     $('#settingsReset').addEventListener('click', function () {
       $('#domainInput').value = DEFAULT_ORIGIN;
+      $('#pageCountOverride').value = '0';
     });
     $('#settingsClose').addEventListener('click', function () { $('#settingsPanel').classList.remove('active'); });
     $('#settingsExportJson').addEventListener('click', exportJson);
@@ -682,7 +794,7 @@
   $$('.batch').forEach(function (b) { b.addEventListener('click', function () { runRandom('catalog', null, Number(b.dataset.size), $('#catalogType').value); }); });
   $('#customRandom').addEventListener('click', function () { runRandom('catalog', null, Number($('#customSize').value), $('#catalogType').value); });
   $('#detectCatalog').addEventListener('click', function () {
-    if (busy) return; var filter = $('#catalogType').value; setBusy(true); detectCatalogPages(filter).then(function () { message('Определено для «' + filterLabel(filter) + '»: ' + currentCatalogPages[filter] + ' страниц.'); }).catch(function (e) { message(e.message || 'Не удалось определить.'); }).finally(function () { setBusy(false); });
+    if (busy) return; var filter = $('#catalogType').value; setBusy(true); detectCatalogPages(filter).then(function () { message('Найдено для «' + filterLabel(filter) + '»: ' + currentCatalogPages[filter] + ' страниц. Рандом использует ' + (pageCountOverride || currentCatalogPages[filter]) + '.'); }).catch(function (e) { message(e.message || 'Не удалось определить.'); }).finally(function () { setBusy(false); });
   });
 
   $$('.yearBatch').forEach(function (b) { b.addEventListener('click', function () { runRandom('year', Number($('#yearSelect').value), Number(b.dataset.size), $('#yearType').value); }); });
@@ -710,7 +822,7 @@
   $('#clearDb').addEventListener('click', function () {
     loadDb().then(function (db) {
       if (!db.length) return;
-      if (confirm('Удалить все ' + db.length + ' карточек?')) return saveDb([]).then(renderDb).then(function () { message('База очищена.'); });
+      if (confirm('Удалить все ' + db.length + ' карточек?')) return Promise.all([saveDb([]),saveUsed([])]).then(renderDb).then(function () { message('База очищена.'); });
     });
   });
   $('#searchInput').addEventListener('input', renderDb);
