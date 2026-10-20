@@ -164,15 +164,31 @@
       }
       return max;
     });
-  }  function runRandomTask(taskId,msg){
+  }  function rememberDetectedPageCount(origin,scope,year,filter,pages){
+    var key='rz_page_cache_v1';
+    return storageGet(key).catch(function(){return null;}).then(function(cache){
+      cache=cache||{};
+      var cacheOrigin=origin;
+      try{cacheOrigin=new URL(origin).origin;}catch(e){}
+      if(cache.domain!==cacheOrigin) cache={domain:cacheOrigin,catalog:{},year:{}};
+      cache.catalog=cache.catalog||{};cache.year=cache.year||{};
+      if(scope==='year') cache.year[String(Number(year))+':'+filter]=pages;
+      else cache.catalog[filter]=pages;
+      var value={};value[key]=cache;return storageSet(value);
+    }).catch(function(){});
+  }
+
+  function runRandomTask(taskId,msg){
     if(runningTasks[taskId]) return Promise.resolve(); runningTasks[taskId]=true;
     var count=Math.max(1,Math.min(30,Number(msg.count)||1)),filter=msg.filter||'all',scope=msg.scope||'catalog',year=Number(msg.year)||null;
     taskProgress(taskId,'Запускаю подбор карточек','Подготавливаю запрос к каталогу.',0,count);
     return getSettings().then(function(settings){
       var origin=settings.domain;
       return pageCount(origin,scope,year,filter,settings.pageCountOverride,taskId,count).then(function(pages){
-        taskProgress(taskId,'Пагинация определена','Всего страниц: '+pages+'. Подбираю карточки без повторов.',0,count);
-        return Promise.all([dbLoad(),usedLoad()]).then(function(values){
+        return rememberDetectedPageCount(origin,scope,year,filter,pages).then(function(){
+          try{send({type:'REZKERY_PAGE_COUNT_DETECTED',scope:scope,year:year,filter:filter,pages:pages});}catch(e){}
+          taskProgress(taskId,'Пагинация определена','Всего страниц: '+pages+'. Подбираю карточки без повторов.',0,count);
+          return Promise.all([dbLoad(),usedLoad()]).then(function(values){
           var db=values[0],used=Object.create(null);db.forEach(function(m){used[norm(m.url)]=1;});values[1].forEach(function(u){used[norm(u)]=1;});var picks=[];
           function one(attempt){
             if(picks.length>=count)return Promise.resolve();
@@ -191,6 +207,7 @@
           return one(0).then(function(){
             taskProgress(taskId,'Сохраняю выбранные карточки','Добавляю карточки в локальную базу и отмечаю их как уже выбранные.',picks.length,count);
             return addUnique(picks).then(function(){picks.forEach(function(m){used[norm(m.url)]=1;});return usedSave(Object.keys(used)).then(function(){return Promise.all(picks.map(function(m){return createTab(m.url,false);})).then(function(){return picks;});});});
+          });
           });
         });
       });
