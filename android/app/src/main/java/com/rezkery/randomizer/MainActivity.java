@@ -773,7 +773,7 @@ public class MainActivity extends Activity {
         String script=
             "window.__rzkSyncResult=null;(async function(){"+
             "const P=window.__rzkSyncProgress={phase:'Подготовка',done:0,total:0};try{"+
-            "const movies="+movieJson+";"+
+            "const movies="+movieJson+";"+"const useCurrentPage="+useCurrentPage+";"+
             "const rateMs="+Math.max(1000,delayMs)+";"+
             "let lastRequest="+(useCurrentPage?"Date.now()":"0")+";"+
             "const uploadEnabled="+upload+";"+
