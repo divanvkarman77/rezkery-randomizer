@@ -128,6 +128,9 @@ public class MainActivity extends Activity {
         githubButton.setOnClickListener(v->githubDialog());
         hdrezkaSyncButton.setOnClickListener(v->hdrezkaSyncDialog());
         settingsButton.setOnClickListener(v->openSettingsWindow());
+        Button suiteButton=new Button(this);suiteButton.setText("📚 Общая библиотека Suite");
+        suiteButton.setOnClickListener(v->startActivity(new Intent(this,SuiteActivity.class)));
+        ((LinearLayout)findViewById(R.id.root)).addView(suiteButton,2);
         applyModeVisibility();
         setStatus("База сохранена локально. Повторно выбранные фильмы пропускаются.");
         maybeAutoSyncBookmarks();
