@@ -64,7 +64,6 @@ public class MainActivity extends Activity {
     JSONArray library = new JSONArray();
     boolean lightTheme;
     AlertDialog databaseDialog;
-    boolean reopenDatabaseAfterFilm=false;
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b); setContentView(R.layout.activity_main);
@@ -474,10 +473,8 @@ public class MainActivity extends Activity {
     void openFilm(String original){
         int mode=prefs.getInt("openMode",0);
         if(mode==2){
-            AlertDialog chooser=new AlertDialog.Builder(this).setTitle("Где открыть фильм?")
-                .setItems(new String[]{"HDRezka App","Браузер"},(d,which)->openFilmWithMode(original,which==0?1:0)).create();
-            chooser.setOnCancelListener(d->{reopenDatabaseIfPending();});
-            chooser.show();
+            new AlertDialog.Builder(this).setTitle("Где открыть фильм?")
+                .setItems(new String[]{"HDRezka App","Браузер"},(d,which)->openFilmWithMode(original,which==0?1:0)).show();
         }else openFilmWithMode(original,mode);
     }
     void openFilmWithMode(String original,int mode){
@@ -488,7 +485,7 @@ public class MainActivity extends Activity {
         }catch(Exception e){
             try{Intent fallback=new Intent(Intent.ACTION_VIEW,Uri.parse(original));fallback.addCategory(Intent.CATEGORY_BROWSABLE);startActivity(fallback);
                 if(mode==1)setStatus("HDRezka App не найдена; ссылка открыта в браузере.");
-            }catch(Exception ex){setStatus("Не удалось открыть ссылку: "+ex.getMessage());reopenDatabaseIfPending();}
+            }catch(Exception ex){setStatus("Не удалось открыть ссылку: "+ex.getMessage());}
         }
     }
     void openBatch(ArrayList<String> urls,int mode){
@@ -568,6 +565,12 @@ public class MainActivity extends Activity {
     }
     void saveLibrary(){prefs.edit().putString("library",library.toString()).putString("used",new JSONArray(usedUrls()).toString()).apply();}
     void setStatus(String s){status.setText(s);}
+    void saveDatabasePosition(){
+        if(databaseDialog==null||!databaseDialog.isShowing())return;
+        ListView list=databaseDialog.getListView();
+        View first=list.getChildAt(0);
+        prefs.edit().putInt("databasePosition",list.getFirstVisiblePosition()).putInt("databaseOffset",first==null?0:first.getTop()).apply();
+    }
     void showDatabase(){
         if(databaseDialog!=null&&databaseDialog.isShowing())return;
         prefs.edit().putString("lastWindow","database").apply();
@@ -582,62 +585,73 @@ public class MainActivity extends Activity {
             String url=item.optString("url","");
             String label=title;
             if(!yearText.isEmpty())label+=" · "+yearText;
-            if(!url.isEmpty())label+="\\n"+url;
+            if(!url.isEmpty())label+="\n"+url;
             labels.add(label);
         }
         if(entries.isEmpty())labels.add("База пока пуста.");
         ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,labels);
         AlertDialog.Builder builder=new AlertDialog.Builder(this).setTitle("Моя база ("+library.length()+")")
-            .setAdapter(adapter,(dialog,which)->{
-                if(which<0||which>=entries.size())return;
-                String url=entries.get(which).optString("url","");
-                if(!url.isEmpty()){reopenDatabaseAfterFilm=true;prefs.edit().putString("lastWindow","database").apply();openFilm(url);}
-            })
-            .setPositiveButton("Случайный из базы",(dialog,which)->openRandomSaved())
+            .setAdapter(adapter,null)
+            .setPositiveButton("Случайный из базы",null)
             .setNeutralButton("Очистить базу",(dialog,which)->new AlertDialog.Builder(this).setMessage("Удалить всю базу и историю без повторов?")
                 .setNegativeButton("Отмена",null).setPositiveButton("Удалить",(confirm,button)->{
                     library=new JSONArray();
-                    prefs.edit().putString("used","[]").apply();
+                    prefs.edit().putString("used","[]").putInt("databasePosition",0).putInt("databaseOffset",0).apply();
                     saveLibrary();
                     setStatus("База и история очищены.");
                 }).show())
             .setNegativeButton("Закрыть",null);
-        databaseDialog=builder.create();
-        databaseDialog.setOnDismissListener(dialog->{if(!reopenDatabaseAfterFilm)prefs.edit().putString("lastWindow","main").apply();databaseDialog=null;});
-        databaseDialog.setOnShowListener(ignored->databaseDialog.getListView().setOnItemLongClickListener((parent,view,position,id)->{
-            if(position<0||position>=entries.size())return true;
-            JSONObject item=entries.get(position);
-            String title=item.optString("title","Без названия");
-            String url=item.optString("url","");
-            new AlertDialog.Builder(this).setTitle(title)
-                .setItems(new String[]{"Открыть фильм","Удалить из базы"},(actionDialog,action)->{
-                    if(action==0){
-                        reopenDatabaseAfterFilm=true;prefs.edit().putString("lastWindow","database").apply();
-                        databaseDialog.dismiss();
-                        if(!url.isEmpty())openFilm(url);
-                    }else if(action==1){
-                        removeMovieFromDatabase(url);
-                        databaseDialog.dismiss();
-                        showDatabase();
-                    }
-                })
-                .setNegativeButton("Отмена",null).show();
-            return true;
-        }));
-        databaseDialog.show();
-    }
-    void reopenDatabaseIfPending(){
-        if(!reopenDatabaseAfterFilm)return;
-        new android.os.Handler(getMainLooper()).postDelayed(()->{
-            if(reopenDatabaseAfterFilm&&!isFinishing()&&(databaseDialog==null||!databaseDialog.isShowing())){
-                reopenDatabaseAfterFilm=false;showDatabase();
+        final AlertDialog dialog=builder.create();
+        databaseDialog=dialog;
+        dialog.setOnDismissListener(d->{
+            if(databaseDialog==dialog){
+                databaseDialog=null;
+                if(!isChangingConfigurations())prefs.edit().putString("lastWindow","main").apply();
             }
-        },250);
+        });
+        dialog.setOnShowListener(ignored->{
+            ListView list=dialog.getListView();
+            int position=Math.max(0,Math.min(prefs.getInt("databasePosition",0),labels.size()-1));
+            list.setSelectionFromTop(position,prefs.getInt("databaseOffset",0));
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{saveDatabasePosition();openRandomSaved();});
+            list.setOnItemClickListener((parent,view,which,id)->{
+                if(which<0||which>=entries.size())return;
+                String url=entries.get(which).optString("url","");
+                if(!url.isEmpty()){saveDatabasePosition();openFilm(url);}
+            });
+            list.setOnItemLongClickListener((parent,view,positionInList,id)->{
+                if(positionInList<0||positionInList>=entries.size())return true;
+                JSONObject item=entries.get(positionInList);
+                String title=item.optString("title","Без названия");
+                String url=item.optString("url","");
+                new AlertDialog.Builder(this).setTitle(title)
+                    .setItems(new String[]{"Открыть фильм","Удалить из базы"},(actionDialog,action)->{
+                        saveDatabasePosition();
+                        if(action==0){
+                            if(!url.isEmpty())openFilm(url);
+                        }else if(action==1){
+                            removeMovieFromDatabase(url);
+                            dialog.dismiss();
+                            showDatabase();
+                        }
+                    })
+                    .setNegativeButton("Отмена",null).show();
+                return true;
+            });
+        });
+        dialog.show();
+    }
+    @Override protected void onPause(){
+        if(prefs!=null&&year!=null){
+            prefs.edit().putString("yearAdvanced",year.getText().toString()).putString("lastYear",year.getText().toString()).apply();
+            saveDatabasePosition();
+        }
+        super.onPause();
     }
     @Override protected void onResume(){
         super.onResume();
         if(prefs!=null&&"database".equals(prefs.getString("lastWindow","main"))&&(databaseDialog==null||!databaseDialog.isShowing())){
-            reopenDatabaseAfterFilm=false;showDatabase();
+            showDatabase();
         }
     }
     void removeMovieFromDatabase(String url){
