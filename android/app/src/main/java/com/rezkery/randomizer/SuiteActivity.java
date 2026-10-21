@@ -9,7 +9,8 @@ import android.widget.*;
 import android.view.*;
 import org.json.*;
 import java.io.*;
-import java.net.*;
+import java.net.URL;
+import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
