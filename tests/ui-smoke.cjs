@@ -83,6 +83,8 @@ const { chromium } = require("playwright");
         url: "https://rezka.fi/films/101-example-1984.html",
         title: "Проверка 1984",
         year: 1984,
+        posterData:
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9KYAAAAASUVORK5CYII=",
       },
       {
         url: "https://rezkery.com/films/102-example-1990.html",
@@ -146,6 +148,33 @@ const { chromium } = require("playwright");
     await page.locator("#exportZip").click();
     const file = await download;
     assert.equal(file.suggestedFilename(), "rezka-suite.zip");
+    const htmlDownload = page.waitForEvent("download");
+    await page.locator("#exportHtml").click();
+    const htmlFile = await htmlDownload;
+    fs.mkdirSync("dist", { recursive: true });
+    const htmlPath = path.resolve("dist/fixture-offline.html");
+    await htmlFile.saveAs(htmlPath);
+    const offline = await context.newPage();
+    offline.on("pageerror", (e) => errors.push(e.message));
+    const remote = [];
+    await offline.route(/^https?:/, (route) => {
+      remote.push(route.request().url());
+      route.abort();
+    });
+    await offline.goto(require("node:url").pathToFileURL(htmlPath).href);
+    await offline.locator("main article").nth(1).waitFor();
+    await offline
+      .getByRole("button", { name: "Проверка 1984", exact: true })
+      .click();
+    await offline.locator("#largePoster").click();
+    await offline.locator("#posterZoom[open]").waitFor();
+    await offline.locator("#zoomClose").click();
+    await offline.locator("#close").click();
+    await offline.locator("#view").selectOption("list");
+    await offline.locator("#year").fill("1984");
+    assert.equal(await offline.locator("main article").count(), 1);
+    assert.deepEqual(remote, []);
+    await offline.close();
     await page.reload();
     await page.locator("#files:not([hidden])").waitFor();
     await page.locator('[data-tab="random"]').click();

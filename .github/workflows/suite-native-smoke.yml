@@ -32,6 +32,7 @@ jobs:
           script: |
             adb install android/app/build/outputs/apk/debug/app-debug.apk
             adb install android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell settings put secure show_ime_with_hard_keyboard 1
             adb shell am instrument -w com.rezkery.randomizer.suite.test/com.rezkery.randomizer.SuiteSmokeInstrumentation | tee native-smoke.txt
             grep -q SUITE_SMOKE_OK native-smoke.txt
       - uses: actions/upload-artifact@v4

@@ -205,3 +205,56 @@ test("future schema in an embedded HTML backup is rejected before changing libra
   assert.equal(await r.count("movies"), 0);
   r.close();
 });
+test("selected collection export excludes unrelated movies and media", async () => {
+  const r = new Repository("selection-" + Math.random());
+  await populate(r);
+  await r.put(
+    "movies",
+    C.normalize({
+      url: "https://rezka.fi/films/99-other.html",
+      title: "Не экспортировать",
+    }).movie,
+  );
+  let text = "";
+  for await (const c of E.json(r, { media: true, scope: "catalog:/year/1990" }))
+    text += c;
+  const data = JSON.parse(text);
+  assert.equal(data.movies.length, 1);
+  assert.equal(data.assets.length, 1);
+  assert.equal(data.memberships.length, 1);
+  assert.ok(!text.includes("Не экспортировать"));
+  r.close();
+});
+test("unknown release years stay visible when sorting by year", async () => {
+  const r = new Repository("null-year-" + Math.random());
+  await r.put(
+    "movies",
+    C.normalize({
+      url: "https://rezka.fi/films/55-unknown.html",
+      title: "Без года",
+    }).movie,
+  );
+  const found = await r.query({ sort: "year", limit: 60 });
+  assert.equal(found.items.length, 1);
+  assert.equal(found.items[0].year, null);
+  r.close();
+});
+test("manual corrections preserve their search index and intentional empty year", () => {
+  const a = C.normalize({
+    url: "https://rezka.fi/films/8-film-1990.html",
+    title: "Моё название",
+    year: null,
+    manual: ["title", "year"],
+  }).movie;
+  const b = C.normalize({
+      url: a.url,
+      title: "Сайт обновился",
+      year: 1990,
+    }).movie,
+    m = C.merge(a, b);
+  assert.equal(m.year, null);
+  assert.equal(m.yearKey, 0);
+  assert.equal(m.title, "Моё название");
+  assert.ok(m.search.includes("мое название"));
+  assert.ok(!m.search.includes("обновился"));
+});

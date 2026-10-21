@@ -1,6 +1,8 @@
 (function (root) {
   "use strict";
   const C = root.RezkaSuite;
+  if (typeof module === "object" && !root.RezkaSuiteViewer)
+    require("./offline-viewer.js");
   const portable = [
     "movies",
     "aliases",
@@ -13,13 +15,51 @@
     "details",
     "tombstones",
   ];
-  async function* json(repo, { media = false } = {}) {
+  async function selection(repo, parent) {
+    if (!parent) return null;
+    const ids = new Set((await repo.children(parent)).map((x) => x.movieId)),
+      assets = new Set(),
+      keys = [...ids];
+    for (let n = 0; n < keys.length; n += 100)
+      for (const m of await repo.getMany("movies", keys.slice(n, n + 100)))
+        if (m?.posterAsset) assets.add(m.posterAsset);
+    return { parent, ids, assets };
+  }
+  async function* records(repo, store, selected) {
+    if (!selected) {
+      yield* repo.iterate(store);
+      return;
+    }
+    if (store === "movies" || store === "assets") {
+      const ids = [...(store === "movies" ? selected.ids : selected.assets)];
+      for (const id of ids) {
+        const row = await repo.get(store, id);
+        if (row) yield row;
+      }
+      return;
+    }
+    for await (const row of repo.iterate(store)) {
+      let yes;
+      if (["catalogs", "collections", "tags"].includes(store))
+        yes = row.id === selected.parent;
+      else if (store === "memberships")
+        yes = row.parentId === selected.parent && selected.ids.has(row.movieId);
+      else if (store === "tombstones") yes = selected.ids.has(row.targetId);
+      else yes = selected.ids.has(row.movieId || row.id);
+      if (yes) yield row;
+    }
+  }
+  async function* json(
+    repo,
+    { media = false, scope = "", selected = null } = {},
+  ) {
+    selected = selected || (await selection(repo, scope));
     yield '{"format":"rezka-suite","schemaVersion":1,"exportedAt":' +
       JSON.stringify(new Date().toISOString());
     for (const store of [...portable, ...(media ? ["assets"] : [])]) {
       yield ',"' + store + '":[';
       let first = true;
-      for await (const row of repo.iterate(store)) {
+      for await (const row of records(repo, store, selected)) {
         yield (first ? "" : ",") + JSON.stringify(row);
         first = false;
       }
@@ -42,7 +82,8 @@
       width === 2 ? v.setUint16(offset, n, true) : v.setUint32(offset, n, true);
     return b;
   }
-  async function* zip(repo) {
+  async function* zip(repo, { scope = "" } = {}) {
+    const selected = await selection(repo, scope);
     let offset = 0;
     const central = [],
       enc = new TextEncoder();
@@ -91,9 +132,9 @@
       ]);
       central.push(ch, n);
     }
-    yield* entry("database.json", json(repo));
+    yield* entry("database.json", json(repo, { selected }));
     let count = 1;
-    for await (const a of repo.iterate("assets")) {
+    for await (const a of records(repo, "assets", selected)) {
       if (++count > 65535)
         throw Error("Слишком много медиа для ZIP: используйте несколько копий");
       yield* entry("assets/" + a.id.replace("image:", "") + ".json", [
@@ -182,18 +223,20 @@
       throw Error("Неверная контрольная сумма " + entry.name);
     yield* C.blobText(entry.blob);
   }
-  async function* offline(repo) {
-    yield '<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rezka — автономная библиотека</title><style>body{font:16px system-ui;background:#171c25;color:#f4f5f7;margin:24px}button,input,select{font:inherit;padding:10px;margin:4px}main{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px}article{padding:14px;background:#263143;border-radius:12px}img{width:100%;height:230px;object-fit:contain}a{color:#b7d8ff}body.light{background:#fff;color:#172137}.light article{background:#eef2f7}p{white-space:pre-wrap}dialog{max-width:650px;width:85%}</style><h1>Моя библиотека</h1><button id="theme">☀ / ☾</button><button id="random">Случайная карточка</button><input id="q" placeholder="Поиск"><input id="year" type="number" placeholder="Год"><select id="type"><option value="">Все типы</option><option value="film">Фильмы</option><option value="series">Сериалы</option><option value="cartoon">Мультфильмы</option><option value="anime">Аниме</option></select><input id="mirror" placeholder="Зеркало, например https://rezka.fi"><p id="count"></p><main></main><button id="more">Ещё</button><dialog><button id="close">Закрыть</button><h2></h2><p></p><a target="_blank" rel="noopener">Открыть на сайте</a></dialog><script type="application/json" id="rezka-suite-data">';
+  async function* offline(repo, { scope = "" } = {}) {
+    yield '<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rezka — автономная библиотека</title><style>body{font:16px system-ui;background:#171c25;color:#f4f5f7;margin:24px}button,input,select{font:inherit;padding:10px;margin:4px}main{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px}article{padding:14px;background:#263143;border-radius:12px}img{width:100%;height:var(--poster-height,230px);object-fit:contain}a{color:#b7d8ff}body.light{background:#fff;color:#172137}.light article{background:#eef2f7}p{white-space:pre-wrap}dialog{max-width:650px;width:85%}*{box-sizing:border-box}input,select{max-width:100%}main.list article{display:grid;grid-template-columns:100px 1fr;margin-bottom:10px}main.list article img{width:95px;height:140px;grid-row:span 2}article{min-width:0;overflow-wrap:anywhere}#largePoster{height:auto;max-height:65vh}#posterZoom{width:96vw;max-width:none}#zoomImage{height:auto;max-height:85vh}dialog img{cursor:zoom-in}</style><h1>Моя библиотека</h1><button id="theme">☀ / ☾</button><button id="random">Случайная карточка</button><input id="q" placeholder="Поиск"><input id="year" type="number" placeholder="Год"><select id="type"><option value="">Все типы</option><option value="film">Фильмы</option><option value="series">Сериалы</option><option value="cartoon">Мультфильмы</option><option value="anime">Аниме</option></select><input id="mirror" placeholder="Зеркало, например https://rezka.fi"><select id="view"><option value="cards">Карточки</option><option value="list">Список</option></select><label>Колонки (0 — авто)<input id="columns" type="range" min="0" max="8" value="0"></label><select id="posterHeight"><option value="150">Постеры 150 px</option><option value="230" selected>Постеры 230 px</option><option value="350">Постеры 350 px</option><option value="480">Постеры 480 px</option></select><p id="count"></p><main></main><button id="more">Ещё</button><dialog id="movieDetail"><button id="previousMovie">←</button><button id="nextMovie">→</button><button id="close">Закрыть</button><h2></h2><img id="largePoster" hidden alt="Постер"><p></p><a target="_blank" rel="noopener">Открыть на сайте</a></dialog><dialog id="posterZoom"><button id="zoomClose">Закрыть постер</button><img id="zoomImage" alt="Постер"></dialog><script type="application/json" id="rezka-suite-data">';
     let bytes = 0;
-    for await (const chunk of json(repo, { media: true })) {
-      bytes += chunk.length;
+    for await (const chunk of json(repo, { media: true, scope })) {
+      bytes += new TextEncoder().encode(chunk).length;
       if (bytes > 64 * 1024 * 1024)
         throw Error(
           "HTML превысил 64 МБ. Сохраните ZIP с медиа вместо одного HTML",
         );
       yield chunk.replace(/</g, "\\u003c");
     }
-    yield '</script><script>"use strict";const data=JSON.parse(document.getElementById("rezka-suite-data").textContent),assets=new Map((data.assets||[]).map(x=>[x.id,x.data])),details=new Map((data.details||[]).map(x=>[x.id,x])),q=document.getElementById("q"),year=document.getElementById("year"),type=document.getElementById("type"),main=document.querySelector("main");let filtered=[],limit=60;function open(m){const d=document.querySelector("dialog");d.querySelector("h2").textContent=m.title;d.querySelector("p").textContent=details.get(m.id)?.description||"";let u=new URL(m.url);try{if(document.getElementById("mirror").value)u=new URL(u.pathname,new URL(document.getElementById("mirror").value).origin);}catch{}d.querySelector("a").href=u.href;d.showModal();}function render(){filtered=data.movies.filter(m=>(!q.value||(m.search||m.title.toLowerCase()).includes(q.value.toLowerCase()))&&(!year.value||m.year===+year.value)&&(!type.value||m.type===type.value));main.replaceChildren();for(const m of filtered.slice(0,limit)){const a=document.createElement("article"),t=document.createElement("button"),p=document.createElement("p");if(assets.has(m.posterAsset)){const i=document.createElement("img");i.src=assets.get(m.posterAsset);a.append(i);}t.textContent=m.title;t.onclick=()=>open(m);p.textContent=[m.year,m.type].filter(Boolean).join(" · ");a.append(t,p);main.append(a);}document.getElementById("count").textContent=filtered.length+" карточек";document.getElementById("more").hidden=limit>=filtered.length;}[q,year,type].forEach(e=>e.oninput=()=>{limit=60;render();});document.getElementById("theme").onclick=()=>document.body.classList.toggle("light");document.getElementById("random").onclick=()=>{if(filtered.length)open(filtered[Math.floor(Math.random()*filtered.length)]);};document.getElementById("close").onclick=()=>document.querySelector("dialog").close();document.getElementById("more").onclick=()=>{limit+=60;render();};render();</script></html>';
+    yield "</script><script>(" +
+      root.RezkaSuiteViewer.mount.toString() +
+      ")();</script></html>";
   }
   root.RezkaSuiteExport = { json, zip, zipEntries, checkedText, offline, crc };
   if (typeof module === "object") module.exports = root.RezkaSuiteExport;

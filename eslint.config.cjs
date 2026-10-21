@@ -9,6 +9,7 @@ module.exports = [
         ...globals.browser,
         ...globals.webextensions,
         module: "readonly",
+        require: "readonly",
         RezkaSuite: "readonly",
         RezkaSuiteRepository: "readonly",
         RezkaSuiteImporter: "readonly",

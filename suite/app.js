@@ -22,6 +22,16 @@
     importer = null,
     abort = null,
     loading = false;
+  const exportLabel = document.createElement("label");
+  exportLabel.textContent = "Экспортировать";
+  const exportScope = document.createElement("select");
+  exportScope.id = "exportScope";
+  exportLabel.append(exportScope);
+  $("exportJson").closest(".row").before(exportLabel);
+  exportScope.onchange = () => {
+    ui.exportScope = exportScope.value;
+    saveUI();
+  };
   const editFields = [
     ["title", "Название"],
     ["originalTitle", "Оригинальное название"],
@@ -189,14 +199,29 @@
       ...(await repo.all("collections")),
       ...(await repo.all("tags")),
     ];
-    for (const id of ["parent", "uploadParent", "detailParent"]) {
+    for (const id of [
+      "parent",
+      "uploadParent",
+      "detailParent",
+      "exportScope",
+    ]) {
       const value = $(id).value;
       $(id).replaceChildren(
-        new Option(id === "parent" ? "Все каталоги" : "Выберите…", ""),
+        new Option(
+          id === "exportScope"
+            ? "Всю библиотеку"
+            : id === "parent"
+              ? "Все каталоги"
+              : "Выберите…",
+          "",
+        ),
       );
       for (const p of rows)
         $(id).add(new Option(p.title || p.name || p.id, p.id));
-      $(id).value = value || ui.filters?.parent || "";
+      $(id).value =
+        id === "exportScope"
+          ? ui.exportScope || ""
+          : value || ui.filters?.parent || "";
     }
     return rows;
   }
@@ -840,17 +865,21 @@
     download(
       "rezka-suite.json",
       "application/json",
-      RezkaSuiteExport.json(repo),
+      RezkaSuiteExport.json(repo, { scope: exportScope.value }),
     ),
   );
   $("exportZip").onclick = guard(() =>
-    download("rezka-suite.zip", "application/zip", RezkaSuiteExport.zip(repo)),
+    download(
+      "rezka-suite.zip",
+      "application/zip",
+      RezkaSuiteExport.zip(repo, { scope: exportScope.value }),
+    ),
   );
   $("exportHtml").onclick = guard(() =>
     download(
       "rezka-suite-offline.html",
       "text/html",
-      RezkaSuiteExport.offline(repo),
+      RezkaSuiteExport.offline(repo, { scope: exportScope.value }),
     ),
   );
   $("exportLegacy").onclick = guard(async () => {

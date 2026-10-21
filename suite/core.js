@@ -455,11 +455,11 @@
       (doc.body?.textContent || "").slice(0, 30000)
     ).toLowerCase();
     return (
-      /just a moment|verify you are human|checking your browser|making sure you.{0,8}not a bot|anubis|проверка браузера/.test(
+      /just a moment|verify you are human|checking your browser|making sure you.{0,8}not a bot|проверка браузера/.test(
         s,
       ) ||
       !!doc.querySelector(
-        '#challenge-running, #anubis_challenge, script[src*="challenge-platform"]',
+        '#challenge-running, #anubis_challenge, #challenge-form, [data-anubis], script[src*="challenge-platform"]',
       )
     );
   }
