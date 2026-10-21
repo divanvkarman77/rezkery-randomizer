@@ -804,6 +804,17 @@
           if (!tabsByOrigin[url.origin] || score > tabsByOrigin[url.origin].score) tabsByOrigin[url.origin] = { tab: tab, score: score };
         } catch (e) {}
       });
+      var favoritesOrigins = [];
+      (tabs || []).forEach(function (tab) {
+        try {
+          var url = new URL(tab.url);
+          if (syncOrigins.indexOf(url.origin) !== -1 && /^\/favorites(?:\/|$)/i.test(url.pathname) && favoritesOrigins.indexOf(url.origin) === -1) favoritesOrigins.push(url.origin);
+        } catch (e) {}
+      });
+      favoritesOrigins.sort(function (a, b) {
+        return Number(!!(tabsByOrigin[b] && tabsByOrigin[b].tab.active)) - Number(!!(tabsByOrigin[a] && tabsByOrigin[a].tab.active));
+      });
+      syncOrigins = favoritesOrigins.concat(syncOrigins.filter(function (origin) { return favoritesOrigins.indexOf(origin) === -1; }));
       return loadDb().then(function (db) {
         var errors = [];
         var noFolderResult = null;
@@ -898,7 +909,7 @@
             }
             try{
               progress('Проверяю вход и папку RANDOM',0,0);
-              var home=await getText(new URL('/favorites/',location.origin).href);
+              var home=/^\/favorites\/?$/i.test(location.pathname)?document.documentElement.outerHTML:await getText(new URL('/favorites/',location.origin).href);
               if(challenge(home))throw new Error('HDRezka показала проверку защиты. Пройди её вручную.');
               if(!/b-favorites_content__cats_list_link/.test(home)&&/(?:name=["'](?:login|email)|Войти в аккаунт|Вход в аккаунт)/i.test(home))throw new Error('Не вижу авторизованные закладки. Войди в HDRezka в этой вкладке.');
               var cat=findRandom(home);
