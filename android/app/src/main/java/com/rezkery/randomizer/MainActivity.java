@@ -8,8 +8,11 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebChromeClient;
+import android.webkit.CookieManager;
 import android.widget.*;
 import android.view.View;
+import android.view.WindowManager;
 import org.json.*;
 import java.io.*;
 import java.net.HttpURLConnection;
@@ -18,7 +21,18 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class MainActivity extends Activity {
-    EditText domain, year, count;
+    EditText domain, year, count, simpleCount, pageCountOverride;
+    CheckBox avoidSameYear, autoSyncBookmarks;
+    AutoCompleteTextView yearDropdown;
+    Button yearMinus, yearPlus, yearDropdownButton, hdrezkaSyncButton, settingsButton;
+    LinearLayout advancedPanel;
+    TextView title;
+    LinearLayout settingsPanel;
+    Spinner requestInterval, protectionCooldown;
+    String[] intervalOptions={"1 секунда","2 секунды","3 секунды","5 секунд"};
+    int[] intervalSeconds={1,2,3,5};
+    String[] cooldownOptions={"1 минута","3 минуты","5 минут","10 минут","15 минут","30 минут"};
+    int[] cooldownMinutes={1,3,5,10,15,30};
     Spinner type, openMode;
     Button simpleModeButton, advancedModeButton;
     boolean simpleMode = true;
@@ -32,6 +46,15 @@ public class MainActivity extends Activity {
     String[] openModes={"Открывать в браузере","Открывать в HDRezka App","Спрашивать каждый раз"};
     int pendingPage=-1;
     int pendingTotal=1, pendingChosen=0, pendingMax=1;
+    int maxPageChecks=1;
+    long batchToken=0, lastPageStarted=0;
+    boolean randomInProgress=false;
+    String batchNotice="";
+    boolean batchSimpleMode=true, batchAvoidSameYear=false;
+    String batchOrigin="https://rezkery.com", batchYear="";
+    int batchType=0;
+    HashSet<String> batchYears=new HashSet<>();
+
     ArrayList<Integer> pendingPages=new ArrayList<>();
     ArrayList<String> pendingUrls=new ArrayList<>();
     HashSet<String> pendingBatchUrls=new HashSet<>();
@@ -40,12 +63,17 @@ public class MainActivity extends Activity {
     static final int PICK_IMPORT=101, PICK_EXPORT_JSON=102, PICK_EXPORT_HTML=103;
     JSONArray library = new JSONArray();
     boolean lightTheme;
+    AlertDialog databaseDialog;
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b); setContentView(R.layout.activity_main);
         prefs=getSharedPreferences("rzk",0);
-        domain=findViewById(R.id.domain); year=findViewById(R.id.year); count=findViewById(R.id.count); type=findViewById(R.id.type);
-        status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); web=findViewById(R.id.web);
+        domain=findViewById(R.id.domain); year=findViewById(R.id.year); count=findViewById(R.id.count); simpleCount=findViewById(R.id.simpleCount); pageCountOverride=findViewById(R.id.catalogPageCount); avoidSameYear=findViewById(R.id.avoidSameYear); autoSyncBookmarks=findViewById(R.id.autoSyncBookmarks); type=findViewById(R.id.type);
+        status=findViewById(R.id.status); subtitle=findViewById(R.id.subtitle); title=findViewById(R.id.title); web=findViewById(R.id.web);
+        yearDropdown=findViewById(R.id.year); yearMinus=findViewById(R.id.yearMinus); yearPlus=findViewById(R.id.yearPlus); yearDropdownButton=findViewById(R.id.yearDropdownButton);
+        hdrezkaSyncButton=findViewById(R.id.hdrezkaSync); settingsButton=findViewById(R.id.settings);
+        settingsPanel=findViewById(R.id.settingsPanel); advancedPanel=findViewById(R.id.advancedPanel); requestInterval=findViewById(R.id.requestInterval); protectionCooldown=findViewById(R.id.protectionCooldown);
+        setupTimeoutControls();
         openMode=findViewById(R.id.openMode);
         simpleModeButton=findViewById(R.id.simpleMode); advancedModeButton=findViewById(R.id.advancedMode);
         simpleMode=prefs.getBoolean("simpleMode",true);
@@ -54,13 +82,29 @@ public class MainActivity extends Activity {
         importJsonButton=findViewById(R.id.importJson); exportHtmlButton=findViewById(R.id.exportHtml);
         importHtmlButton=findViewById(R.id.importHtml); driveExportButton=findViewById(R.id.driveExport);
         driveImportButton=findViewById(R.id.driveImport); githubButton=findViewById(R.id.githubSync);
-        domain.setText(prefs.getString("domain","https://rezkery.com"));
+        domain.setText(prefs.getString("domainAdvanced",prefs.getString("domain","https://rezkery.com")));
+        simpleCount.setText(prefs.getString("simpleCount","1")); pageCountOverride.setText(prefs.getString("catalogPageCountOverride","0"));
+        avoidSameYear.setChecked(prefs.getBoolean("avoidSameYear",false));
+        avoidSameYear.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("avoidSameYear",checked).apply());
+        autoSyncBookmarks.setChecked(prefs.getBoolean("autoSyncBookmarks",false));
+        autoSyncBookmarks.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("autoSyncBookmarks",checked).apply());
+        year.setText(prefs.getString("lastYear",prefs.getString("yearAdvanced",""))); count.setText(prefs.getString("countAdvanced",prefs.getString("pickCount","1")));
         lightTheme=prefs.getBoolean("lightTheme",false);
         type.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,types) {{
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         }});
         openMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,openModes) {{ setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }});
-        openMode.setSelection(prefs.getInt("openMode",0));
+        openMode.setSelection(Math.max(0,Math.min(prefs.getInt("openMode",0),openModes.length-1)));
+        type.setSelection(Math.max(0,Math.min(prefs.getInt("categoryAdvanced",0),types.length-1)));
+        ArrayList<String> yearOptions=new ArrayList<>(); for(int y=maximumSelectableYear();y>=1900;y--)yearOptions.add(String.valueOf(y));
+        ArrayAdapter<String> yearAdapter=new ArrayAdapter<String>(this,android.R.layout.simple_dropdown_item_1line,yearOptions);
+        yearDropdown.setAdapter(yearAdapter); yearDropdown.setThreshold(0);
+        yearDropdown.setOnFocusChangeListener((v,hasFocus)->{if(hasFocus){yearDropdown.post(()->yearDropdown.showDropDown());}});
+        yearDropdown.setOnClickListener(v->yearDropdown.showDropDown());
+        yearDropdownButton.setOnClickListener(v->{yearDropdown.requestFocus();yearDropdown.showDropDown();});
+        yearMinus.setOnClickListener(v->adjustYear(-1)); yearPlus.setOnClickListener(v->adjustYear(1));
+        domain.addTextChangedListener(simpleWatcher("domainAdvanced")); year.addTextChangedListener(simpleWatcher("yearAdvanced")); count.addTextChangedListener(simpleWatcher("countAdvanced")); simpleCount.addTextChangedListener(simpleWatcher("simpleCount")); pageCountOverride.addTextChangedListener(simpleWatcher("catalogPageCountOverride"));
+        type.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("categoryAdvanced",pos).apply();}public void onNothingSelected(android.widget.AdapterView<?> p){}});
         openMode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
             public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("openMode",pos).apply();}
             public void onNothingSelected(android.widget.AdapterView<?> p){}
@@ -71,8 +115,8 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView v,String u){ v.evaluateJavascript(parserScript(), value -> handleParsed(value)); }
         });
         random.setOnClickListener(v->startRandom());
-        simpleModeButton.setOnClickListener(v->{simpleMode=true;prefs.edit().putBoolean("simpleMode",true).apply();applyModeVisibility();});
-        advancedModeButton.setOnClickListener(v->{simpleMode=false;prefs.edit().putBoolean("simpleMode",false).apply();applyModeVisibility();});
+        simpleModeButton.setOnClickListener(v->switchMode(true));
+        advancedModeButton.setOnClickListener(v->switchMode(false));
         themeButton.setOnClickListener(v->{lightTheme=!lightTheme;prefs.edit().putBoolean("lightTheme",lightTheme).apply();applyTheme();});
         databaseButton.setOnClickListener(v->showDatabase());
         exportJsonButton.setOnClickListener(v->chooseExport(PICK_EXPORT_JSON,"rezkery-database.json","application/json"));
@@ -82,35 +126,50 @@ public class MainActivity extends Activity {
         driveExportButton.setOnClickListener(v->chooseExport(PICK_EXPORT_JSON,"rezkery-drive-backup.json","application/json"));
         driveImportButton.setOnClickListener(v->chooseImport("application/json"));
         githubButton.setOnClickListener(v->githubDialog());
+        hdrezkaSyncButton.setOnClickListener(v->hdrezkaSyncDialog());
+        settingsButton.setOnClickListener(v->openSettingsWindow());
         applyModeVisibility();
         setStatus("База сохранена локально. Повторно выбранные фильмы пропускаются.");
+        maybeAutoSyncBookmarks();
     }
 
     void applyTheme(){
         int selectedType=type.getSelectedItemPosition();
         int selectedOpenMode=openMode.getSelectedItemPosition();
+        int selectedInterval=requestInterval.getSelectedItemPosition(), selectedCooldown=protectionCooldown.getSelectedItemPosition();
         int bg=lightTheme?Color.rgb(247,249,252):Color.rgb(17,19,23);
         int fg=lightTheme?Color.rgb(24,29,38):Color.WHITE;
         int muted=lightTheme?Color.rgb(76,86,102):Color.rgb(174,181,193);
         LinearLayout root=findViewById(R.id.root);
-        root.setBackgroundColor(bg);
-        subtitle.setTextColor(muted); status.setTextColor(muted);
-        domain.setTextColor(fg); year.setTextColor(fg);
-        domain.setHintTextColor(muted); year.setHintTextColor(muted);
+        root.setBackgroundColor(bg); tintLabels(root,muted);
+        title.setTextColor(fg); subtitle.setTextColor(muted); status.setTextColor(muted);
+        domain.setTextColor(fg); year.setTextColor(fg); pageCountOverride.setTextColor(fg);
+        domain.setHintTextColor(muted); year.setHintTextColor(muted); pageCountOverride.setHintTextColor(muted);
         int[][] states=new int[][]{new int[]{android.R.attr.state_enabled},new int[]{}};
         int[] colors=new int[]{fg,fg};
         type.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
         openMode.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
         openMode.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
         type.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(70,80,96):Color.rgb(190,198,210)));
-        for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton,simpleModeButton,advancedModeButton}){
+        for(Button b:new Button[]{random,themeButton,databaseButton,exportJsonButton,importJsonButton,exportHtmlButton,importHtmlButton,driveExportButton,driveImportButton,githubButton,hdrezkaSyncButton,yearMinus,yearPlus,yearDropdownButton,settingsButton,simpleModeButton,advancedModeButton}){
             b.setTextColor(lightTheme?Color.WHITE:Color.rgb(20,22,26));
             b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(lightTheme?Color.rgb(42,91,170):Color.rgb(224,228,234)));
         }
-        themeButton.setText(lightTheme?"☾ Тёмная тема":"☀ Светлая тема");
+        themeButton.setText(lightTheme?"☾":"☀");
+        themeButton.setContentDescription(lightTheme?"Включить тёмную тему":"Включить светлую тему");
         getWindow().setStatusBarColor(bg); getWindow().setNavigationBarColor(bg);
         getWindow().getDecorView().setSystemUiVisibility(lightTheme?ViewFlags.LIGHT_STATUS:0);
         // Force readable dropdown text; the adapter is recreated when theme changes.
+        ArrayList<String> yearOptions=new ArrayList<>();for(int y=maximumSelectableYear();y>=1900;y--)yearOptions.add(String.valueOf(y));
+        yearDropdown.setDropDownBackgroundDrawable(new android.graphics.drawable.ColorDrawable(lightTheme?Color.WHITE:Color.rgb(38,42,50)));
+        yearDropdown.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_dropdown_item_1line,yearOptions){
+            @Override public android.view.View getView(int position,android.view.View convert,android.view.ViewGroup parent){
+                TextView tv=(TextView)super.getView(position,convert,parent);tv.setTextColor(fg);tv.setPadding(18,12,18,12);tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50));return tv;
+            }
+            @Override public android.view.View getDropDownView(int position,android.view.View convert,android.view.ViewGroup parent){
+                TextView tv=(TextView)super.getDropDownView(position,convert,parent);tv.setTextColor(fg);tv.setPadding(18,14,18,14);tv.setBackgroundColor(lightTheme?Color.WHITE:Color.rgb(38,42,50));return tv;
+            }
+        });
         type.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,types) {
             { setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); }
             @Override public android.view.View getView(int position, android.view.View convert, android.view.ViewGroup parent) {
@@ -131,109 +190,178 @@ public class MainActivity extends Activity {
             }
         });
         openMode.setSelection(Math.max(0, Math.min(selectedOpenMode, openModes.length-1)));
+        styleChoiceSpinner(requestInterval,intervalOptions,selectedInterval,fg,lightTheme);
+        styleChoiceSpinner(protectionCooldown,cooldownOptions,selectedCooldown,fg,lightTheme);
+    }
+    void tintLabels(android.view.ViewGroup group,int color){
+        for(int i=0;i<group.getChildCount();i++){
+            android.view.View child=group.getChildAt(i);
+            if(child instanceof Button)continue;
+            if(child instanceof EditText){((TextView)child).setTextColor(lightTheme?Color.rgb(24,29,38):Color.WHITE);continue;}
+            if(child instanceof TextView)((TextView)child).setTextColor(color);
+            if(child instanceof android.view.ViewGroup)tintLabels((android.view.ViewGroup)child,color);
+        }
     }
     static class ViewFlags { static final int LIGHT_STATUS=0x00002000; }
 
     String origin(){
         String d=domain.getText().toString().trim();
+        if(d.isEmpty())d="https://rezkery.com";
         if(!d.matches("(?i)^https?://.*")) d="https://"+d;
         return d.replaceAll("/+$","");
     }
     String pageUrl(int page){
-        int t=type.getSelectedItemPosition(); String y=year.getText().toString().trim(); String g=genres[t];
-        String path;
-        if(!y.isEmpty()) path=origin()+"/year/"+y+(page>1?"/page/"+page+"/":"/");
-        else path=origin()+(page>1?"/page/"+page+"/":"/");
-        return path+(g.isEmpty()?"":"?filter=last&genre="+g);
+        boolean simple=randomInProgress?batchSimpleMode:simpleMode;
+        String host=randomInProgress?batchOrigin:origin();
+        String selectedYear=randomInProgress?batchYear:(simple?"":year.getText().toString().trim());
+        int selectedType=randomInProgress?batchType:(simple?0:type.getSelectedItemPosition());
+        String genre=genres[Math.max(0,Math.min(selectedType,genres.length-1))];
+        String path=selectedYear.isEmpty()?host+(page>1?"/page/"+page+"/":"/"):
+            host+"/year/"+selectedYear+(page>1?"/page/"+page+"/":"/");
+        return path+(genre.isEmpty()?"":"?filter=last&genre="+genre);
     }
     void startRandom(){
-        String y=year.getText().toString().trim();
-        if(!y.isEmpty()&&!y.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
-        prefs.edit().putString("domain",origin()).putString("pickCount",count.getText().toString().trim()).apply();
-        try { pendingTotal=Math.max(1,Math.min(30,Integer.parseInt(count.getText().toString().trim()))); } catch(Exception e){pendingTotal=1;}
-        pendingChosen=0; pendingUrls.clear(); pendingBatchUrls.clear(); pendingPages.clear(); attemptedPages.clear(); pendingTitles.clear(); pendingPage=-1;
-        setStatus("Определяю страницы каталога…"); web.loadUrl(pageUrl(1));
+        long protectionCooldown=prefs.getLong("protectionCooldownUntil",0L);
+        if(System.currentTimeMillis()<protectionCooldown){
+            long minutes=Math.max(1,(protectionCooldown-System.currentTimeMillis()+59999L)/60000L);
+            new AlertDialog.Builder(this).setTitle("Пауза после проверки защиты")
+                .setMessage("Подбор временно приостановлен ещё примерно на "+minutes+" мин. Если ты уже прошёл проверку в браузере, можно сделать один осторожный запрос для проверки.")
+                .setNegativeButton("Подождать",null)
+                .setPositiveButton("Я прошёл проверку — проверить один раз",(d,w)->{
+                    prefs.edit().remove("protectionCooldownUntil").apply();
+                    startRandom();
+                }).show();
+            return;
+        }
+        if(randomInProgress){setStatus("Подбор уже выполняется. Подожди завершения.");return;}
+        batchSimpleMode=simpleMode;
+        batchOrigin=origin();
+        batchYear=simpleMode?"":year.getText().toString().trim();
+        batchType=simpleMode?0:type.getSelectedItemPosition();
+        if(!batchYear.isEmpty()&&!batchYear.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
+        if(!simpleMode)prefs.edit().putString("domainAdvanced",batchOrigin).putString("yearAdvanced",batchYear).putString("lastYear",batchYear).putString("countAdvanced",count.getText().toString().trim()).putInt("categoryAdvanced",batchType).apply();
+        try {
+            int selected=simpleMode?Integer.parseInt(simpleCount.getText().toString().trim()):Integer.parseInt(count.getText().toString().trim());
+            pendingTotal=Math.max(1,Math.min(30,selected));
+        }catch(Exception e){pendingTotal=1;}
+        batchAvoidSameYear=prefs.getBoolean("avoidSameYear",false)&&batchYear.isEmpty();
+        pendingChosen=0; pendingUrls.clear(); pendingBatchUrls.clear(); pendingPages.clear(); attemptedPages.clear(); pendingTitles.clear(); pendingPage=-1;batchYears.clear();
+        randomInProgress=true;batchNotice="";batchToken++;lastPageStarted=android.os.SystemClock.elapsedRealtime();
+        setStatus("Проверяю каталог…"); web.loadUrl(pageUrl(1));
     }
     String parserScript(){
         return "(function(){var cards=[],seen={};var ns=document.querySelectorAll('.b-content__inline_item');"+
-        "for(var i=0;i<ns.length;i++){var n=ns[i],a=n.querySelector('a[href]');if(!a)continue;var u=a.href;if(seen[u])continue;seen[u]=1;var l=n.querySelector('.b-content__inline_item-link');cards.push({url:u,title:(l?l.innerText:a.innerText||'Без названия').trim()});}"+
-        "var max=1,as=document.querySelectorAll('a[href]');for(var j=0;j<as.length;j++){var h=as[j].href,m=h.match(/\\/page\\/(\\d+)\\/?(?:\\?.*)?$/);if(m)max=Math.max(max,parseInt(m[1],10)||1);}return JSON.stringify({cards:cards,max:max});})()";
+        "for(var i=0;i<ns.length;i++){var n=ns[i],a=n.querySelector('a[href]');if(!a)continue;var u=a.href;if(seen[u])continue;seen[u]=1;var l=n.querySelector('.b-content__inline_item-link'),years=(n.innerText||'').match(/(19|20|21)\\d{2}/g)||[],urlYears=u.match(/(19|20|21)\\d{2}/g)||[],ym=urlYears.length?urlYears[urlYears.length-1]:(years.length?years[years.length-1]:'');cards.push({url:u,title:(l?l.innerText:a.innerText||'Без названия').trim(),year:ym});}"+
+        "var max=1,as=document.querySelectorAll('a[href]'),path=location.pathname,yearMatch=path.match(/^\\/year\\/(\\d{4})(?:\\/page\\/\\d+)?\\/?$/),yearScope=!!yearMatch,yearValue=yearMatch?yearMatch[1]:'',genre=new URL(location.href).searchParams.get('genre')||'',filter=new URL(location.href).searchParams.get('filter')||'';"+
+        "var pageNumber=function(h){try{var u=new URL(h,location.href),m=u.pathname.match(/\\/page\\/(\\d+)\\/?$/),q=u.searchParams.get('page');return m?parseInt(m[1],10):(q?parseInt(q,10):1)}catch(e){return 1}};"+
+        "for(var j=0;j<as.length;j++){try{var u=new URL(as[j].href,location.href),up=u.pathname,n=pageNumber(u.href),same=u.origin===location.origin&&(u.searchParams.get('genre')||'')===genre&&(!filter||(u.searchParams.get('filter')||'')===filter),match=yearScope?new RegExp('^/year/'+yearValue+'/page/\\\\d+/?$').test(up):/^\\/page\\/\\d+\\/?$/.test(up);if(same&&match)max=Math.max(max,n);var marker=((as[j].getAttribute('rel')||'')+' '+as[j].className+' '+((as[j].parentElement&&as[j].parentElement.className)||'')+' '+as[j].textContent).toLowerCase();if(same&&n>1&&/(last|послед|посл)/i.test(marker))max=Math.max(max,n)}catch(e){}}"+
+        "var nav=document.querySelector('.b-navigation__next'),na=nav&&(nav.closest('a')||nav.parentElement&&nav.parentElement.closest('a')),next=na?na.href:'';"+
+
+        "var title=document.title||'',body=document.body?(document.body.innerText||'').slice(0,4000):'',challenge=/anubis|cloudflare|cdn-cgi\\/challenge|challenge-platform|captcha|checking your browser|just a moment|провер(ка|ьте).*человек|подтвердите.*человек/i.test(location.href+' '+title+' '+body)||!!document.querySelector('#challenge-form,.cf-challenge,#anubis_challenge,[data-anubis]');"+
+        "return JSON.stringify({cards:cards,max:max,challenge:challenge,title:title});})()";
     }
     void handleParsed(String value){
         try{
             String raw=value;
             if(raw.startsWith("\"") && raw.endsWith("\"")) raw=(String)new JSONTokener(raw).nextValue();
             JSONObject r=new JSONObject(raw); int max=Math.max(1,r.optInt("max",1)); JSONArray cards=r.optJSONArray("cards");
+            if(r.optBoolean("challenge",false)){
+                long cooldown=Math.max(1,prefs.getInt("protectionCooldownMinutes",15));
+                batchNotice="Обнаружена проверка защиты сайта ("+r.optString("title","")+
+                    "). Запросы остановлены. Повторный запрос будет доступен через "+cooldown+" мин.";
+                prefs.edit().putLong("protectionCooldownUntil",System.currentTimeMillis()+cooldown*60L*1000L).apply();
+                pendingPages.clear();finishBatch();return;
+            }
             if(pendingPage==-1 && pendingChosen==0 && pendingUrls.isEmpty()){
-                // Trust pagination actually found in the loaded page. A fabricated
-                // fallback (thousands of pages) can trap the app in an endless scan
-                // when the mirror changes its pagination markup or shows a challenge.
-                pendingMax=Math.max(1,Math.min(max,10000));
-                int wanted=Math.min(pendingTotal,pendingMax);
+                if(cards==null||cards.length()==0){
+                    batchNotice="Сайт не вернул карточки каталога. Запросы остановлены, чтобы не нагружать сервер.";
+                    pendingPages.clear();finishBatch();return;
+                }
+                int manualMax=0;try{manualMax=Integer.parseInt(prefs.getString("catalogPageCountOverride","0"));}catch(Exception ignored){} pendingMax=batchYear.isEmpty()&&manualMax>0?Math.min(manualMax,100000):Math.max(1,Math.min(max,100000));
+                maxPageChecks=Math.min(pendingMax,Math.max(pendingTotal,Math.min(24,pendingTotal*3)));
                 ArrayList<Integer> all=new ArrayList<>(); for(int p=1;p<=pendingMax;p++)all.add(p);
                 Collections.shuffle(all);
-                for(int i=0;i<wanted;i++)pendingPages.add(all.get(i));
+                // Page 1 is only used to discover the catalogue size. Pick every result from a
+                // randomly selected page, including page 1 only when it wins the random draw.
+                for(int i=0;i<Math.min(maxPageChecks,all.size());i++)pendingPages.add(all.get(i));
                 loadNextBatchPage(); return;
             }
             processBatchPage(cards);
-        }catch(Exception e){setStatus("Ошибка чтения страницы: "+e.getMessage());}
+        }catch(Exception e){
+            setStatus("Ошибка чтения страницы: "+e.getMessage());
+            randomInProgress=false;batchToken++;pendingPages.clear();
+        }
     }
     void loadNextBatchPage(){
         if(pendingPages.isEmpty() || pendingChosen>=pendingTotal){finishBatch();return;}
         pendingPage=pendingPages.remove(0); attemptedPages.add(pendingPage);
-        setStatus("Выбираю карточку "+(pendingChosen+1)+" из "+pendingTotal+" — страница "+pendingPage+"…");
-        web.loadUrl(pageUrl(pendingPage));
+        final int page=pendingPage;final long token=batchToken;
+        setStatus("Выбираю карточку "+(pendingChosen+1)+" из "+pendingTotal+" — страница "+page+"…");
+        long elapsed=android.os.SystemClock.elapsedRealtime()-lastPageStarted;
+        long intervalMs=Math.max(1000L,prefs.getInt("requestIntervalSeconds",2)*1000L);
+        long delay=Math.max(0L,intervalMs-elapsed);
+        new android.os.Handler(getMainLooper()).postDelayed(()->{
+            if(!randomInProgress||token!=batchToken||pendingPage!=page)return;
+            lastPageStarted=android.os.SystemClock.elapsedRealtime();
+            web.loadUrl(pageUrl(page));
+        },delay);
     }
     void processBatchPage(JSONArray cards) throws Exception {
         HashSet<String> used=usedUrls(); used.addAll(pendingBatchUrls);
-        ArrayList<JSONObject> candidates=new ArrayList<>();
+        ArrayList<JSONObject> candidates=new ArrayList<>(), sameYearCandidates=new ArrayList<>();
         if(cards!=null) for(int i=0;i<cards.length();i++){
             JSONObject x=cards.getJSONObject(i); String u=x.optString("url","");
-            if(!u.isEmpty()&&!used.contains(u)) candidates.add(x);
+            String key=movieKey(u);
+            if(!u.isEmpty()&&!used.contains(key)){
+                String cardYear=x.optString("year","");
+                if(!batchAvoidSameYear||cardYear.isEmpty()||!batchYears.contains(cardYear))candidates.add(x);
+                else sameYearCandidates.add(x);
+            }
         }
         if(!candidates.isEmpty()){
             JSONObject pick=candidates.get(new Random().nextInt(candidates.size()));
-            String u=pick.getString("url"); pendingBatchUrls.add(u); pendingUrls.add(u);
-            pendingTitles.put(u,pick.optString("title",u)); pendingChosen++;
-        }
-        if(pendingChosen<pendingTotal && pendingPages.isEmpty()){
-            ArrayList<Integer> extra=new ArrayList<>();
-            for(int p=1;p<=pendingMax;p++)if(!attemptedPages.contains(p))extra.add(p);
-            Collections.shuffle(extra);
-            for(int p:extra){pendingPages.add(p);if(pendingPages.size()>=pendingTotal-pendingChosen)break;}
+            String u=pick.getString("url"), cardYear=pick.optString("year","");
+            pendingBatchUrls.add(movieKey(u)); pendingUrls.add(u);pendingTitles.put(u,pick.optString("title",u));
+            if(!cardYear.isEmpty())batchYears.add(cardYear);
+            pendingChosen++;
         }
         if(!pendingPages.isEmpty() && pendingChosen<pendingTotal){loadNextBatchPage();return;}
+        if(pendingUrls.size()<pendingTotal&&batchAvoidSameYear&&!sameYearCandidates.isEmpty()&&pendingPages.isEmpty()){
+            batchNotice="На оставшихся проверенных страницах уже выбранные года повторялись — поэтому карточек получилось меньше количества в настройках.";
+        }
         finishBatch();
     }
     void finishBatch(){
+        int requested=pendingTotal;
         try{
-            if(pendingUrls.isEmpty()){setStatus("Не удалось найти новые карточки на разных страницах. Попробуй снова.");return;}
+            if(pendingUrls.isEmpty()){
+                setStatus(batchNotice.isEmpty()?"Не удалось найти новые карточки на проверенных страницах. Попробуй позже.":batchNotice);
+                return;
+            }
+            HashSet<String> savedKeys=usedUrls();
             for(String u:pendingUrls){
-                JSONObject record=new JSONObject();record.put("url",u);record.put("title",pendingTitles.containsKey(u)?pendingTitles.get(u):u);
-                record.put("date",System.currentTimeMillis());record.put("domain",origin());library.put(record);
+                String key=movieKey(u);if(key.isEmpty()||savedKeys.contains(key))continue;
+                JSONObject record=new JSONObject();record.put("id",key);record.put("url",u);record.put("title",pendingTitles.containsKey(u)?pendingTitles.get(u):u);
+                record.put("date",System.currentTimeMillis());record.put("domain",batchOrigin);library.put(record);savedKeys.add(key);
             }
             saveLibrary();
-            int mode=prefs.getInt("openMode",0);
-            if(mode==1){openFilm(pendingUrls.get(0));setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц. В HDRezka App открыта первая; остальные сохранены в базе. Всего записей: "+library.length());}
-            else {
-                // Launch ACTION_VIEW intents in separate UI ticks so Android's browser
-                // has time to process every selected card instead of dropping launches.
-                final ArrayList<String> toOpen=new ArrayList<>(pendingUrls);
-                for(int i=0;i<toOpen.size();i++){
-                    final String u=toOpen.get(i);
-                    new android.os.Handler(getMainLooper()).postDelayed(()->openFilm(u),i*650L);
-                }
-                setStatus("Выбрано "+pendingUrls.size()+" карточек с разных страниц и сохранено в базе. Всего записей: "+library.length());
-            }
+            int mode=prefs.getInt("openMode",0);openBatch(new ArrayList<>(pendingUrls),mode);
+            String message="Выбрано "+pendingUrls.size()+" карточек с разных страниц и сохранено в базе. Всего записей: "+library.length();
+            if(pendingUrls.size()<requested)message+=" Проверено не более "+maxPageChecks+" страниц за один запуск.";
+            if(!batchNotice.isEmpty())message+=" "+batchNotice;
+            setStatus(message);
             String ghToken=prefs.getString("ghToken","");if(!ghToken.isEmpty())syncGithub(ghToken,prefs.getString("ghGist",""));
         }catch(Exception e){setStatus("Ошибка сохранения выбранных карточек: "+e.getMessage());}
-        finally{pendingPage=-1;pendingTotal=1;pendingChosen=0;pendingPages.clear();pendingBatchUrls.clear();pendingUrls.clear();attemptedPages.clear();pendingTitles.clear();}
+        finally{
+            randomInProgress=false;batchToken++;batchNotice="";pendingPage=-1;pendingTotal=1;pendingChosen=0;
+            pendingPages.clear();pendingBatchUrls.clear();pendingUrls.clear();attemptedPages.clear();pendingTitles.clear();
+        }
     }
     void pickFrom(JSONArray cards){
         try{
             if(cards==null||cards.length()==0){setStatus("На странице не найдены карточки. Если сайт показывает проверку, пройди её в браузере и попробуй снова.");return;}
-            HashSet<String> used=usedUrls(); ArrayList<JSONObject> candidates=new ArrayList<>();
-            for(int i=0;i<cards.length();i++){JSONObject x=cards.getJSONObject(i);if(!used.contains(x.getString("url")))candidates.add(x);}
+            HashSet<String> used=usedUrls(), seen=new HashSet<>(); ArrayList<JSONObject> candidates=new ArrayList<>();
+            for(int i=0;i<cards.length();i++){JSONObject x=cards.getJSONObject(i);String key=movieKey(x.optString("url",""));if(!key.isEmpty()&&!used.contains(key)&&seen.add(key))candidates.add(x);}
             if(candidates.isEmpty()){setStatus("На этой странице все фильмы уже выбраны. Попробуй ещё раз.");return;}
             Collections.shuffle(candidates);
             int wanted=1;
@@ -242,34 +370,97 @@ public class MainActivity extends Activity {
             ArrayList<String> urls=new ArrayList<>();
             for(int i=0;i<n;i++){
                 JSONObject pick=candidates.get(i); String u=pick.getString("url");
-                JSONObject record=new JSONObject();record.put("url",u);record.put("title",pick.optString("title","Без названия"));
+                String key=movieKey(u);if(used.contains(key))continue;
+                JSONObject record=new JSONObject();record.put("id",key);record.put("url",u);record.put("title",pick.optString("title","Без названия"));
                 record.put("date",System.currentTimeMillis());record.put("domain",origin());
-                library.put(record);urls.add(u);
+                library.put(record);used.add(key);urls.add(u);
             }
             saveLibrary();
             int mode=prefs.getInt("openMode",0);
-            if(mode==1) {
-                openFilm(urls.get(0));
-                setStatus("Выбрано "+n+" карточек. В HDRezka App открыта первая; остальные сохранены в базе. Всего записей: "+library.length());
-            } else {
-                for(String u:urls) openFilm(u);
-                setStatus("Выбрано и сохранено карточек: "+n+". Всего записей: "+library.length());
-            }
+            openBatch(urls,mode);
+            setStatus("Выбрано и сохранено карточек: "+n+". Всего записей: "+library.length());
             String ghToken=prefs.getString("ghToken","");
             if(!ghToken.isEmpty()) syncGithub(ghToken,prefs.getString("ghGist",""));
         }catch(Exception e){setStatus("Ошибка: "+e.getMessage());}
     }
 
+    void switchMode(boolean simple){
+        if(randomInProgress){setStatus("Сначала дождись завершения текущего подбора, затем переключи режим.");return;}
+        if(simpleMode==simple)return;
+        simpleMode=simple;prefs.edit().putBoolean("simpleMode",simple).apply();applyModeVisibility();
+    }
     void applyModeVisibility(){
-        int advanced=simpleMode?View.GONE:View.VISIBLE;
-        int[] ids={R.id.domainLabel,R.id.domain,R.id.categoryLabel,R.id.type,R.id.yearLabel,R.id.year,R.id.countLabel,R.id.count,
-            R.id.theme,R.id.database,R.id.backupTitle,R.id.exportJson,R.id.importJson,R.id.exportHtml,R.id.importHtml,
-            R.id.driveTitle,R.id.driveDescription,R.id.driveExport,R.id.driveImport,R.id.githubTitle,R.id.githubDescription,R.id.githubSync};
-        for(int id:ids){android.view.View v=findViewById(id);if(v!=null)v.setVisibility(advanced);}
         simpleModeButton.setVisibility(simpleMode?View.GONE:View.VISIBLE);
         advancedModeButton.setVisibility(simpleMode?View.VISIBLE:View.GONE);
-        random.setText(simpleMode?"🎲 ВЫБРАТЬ СЛУЧАЙНУЮ КАРТОЧКУ":"ОТКРЫТЬ СЛУЧАЙНЫЕ КАРТОЧКИ");
-        count.setText(prefs.getString("pickCount","1"));
+        advancedPanel.setVisibility(simpleMode?View.GONE:View.VISIBLE);
+        random.setVisibility(View.VISIBLE);
+        random.setText(simpleMode?"🎲 ВЫБРАТЬ СЛУЧАЙНУЮ КАРТОЧКУ":"🎲 ВЫБРАТЬ СЛУЧАЙНЫЕ КАРТОЧКИ");
+        if(!simpleMode){
+            year.setText(prefs.getString("yearAdvanced",""));
+            count.setText(prefs.getString("countAdvanced","1"));
+            type.setSelection(Math.max(0,Math.min(prefs.getInt("categoryAdvanced",0),types.length-1)));
+        }
+    }
+    void setupTimeoutControls(){
+        styleChoiceSpinner(requestInterval,intervalOptions,indexOf(intervalSeconds,prefs.getInt("requestIntervalSeconds",2)),Color.BLACK,true);
+        styleChoiceSpinner(protectionCooldown,cooldownOptions,indexOf(cooldownMinutes,prefs.getInt("protectionCooldownMinutes",15)),Color.BLACK,true);
+        requestInterval.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("requestIntervalSeconds",intervalSeconds[Math.max(0,Math.min(pos,intervalSeconds.length-1))]).apply();}
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+        });
+        protectionCooldown.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("protectionCooldownMinutes",cooldownMinutes[Math.max(0,Math.min(pos,cooldownMinutes.length-1))]).apply();}
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
+        });
+    }
+    int indexOf(int[] choices,int value){for(int i=0;i<choices.length;i++)if(choices[i]==value)return i;return 0;}
+    void styleChoiceSpinner(Spinner spinner,String[] values,int selected,int foreground,boolean light){
+        spinner.setPopupBackgroundDrawable(new android.graphics.drawable.ColorDrawable(light?Color.WHITE:Color.rgb(38,42,50)));
+        spinner.setBackgroundTintList(android.content.res.ColorStateList.valueOf(light?Color.rgb(70,80,96):Color.rgb(190,198,210)));
+        spinner.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,values){
+            {setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);}
+            @Override public android.view.View getView(int position,android.view.View convert,android.view.ViewGroup parent){
+                TextView tv=(TextView)super.getView(position,convert,parent);tv.setTextColor(foreground);tv.setPadding(12,8,12,8);return tv;
+            }
+            @Override public android.view.View getDropDownView(int position,android.view.View convert,android.view.ViewGroup parent){
+                TextView tv=(TextView)super.getDropDownView(position,convert,parent);tv.setTextColor(foreground);tv.setBackgroundColor(light?Color.WHITE:Color.rgb(38,42,50));tv.setPadding(18,18,18,18);return tv;
+            }
+        });
+        spinner.setSelection(Math.max(0,Math.min(selected,values.length-1)));
+    }
+    void openSettingsWindow(){
+        LinearLayout root=findViewById(R.id.root);
+        if(settingsPanel.getParent()!=root)return;
+        android.view.ViewGroup parent=(android.view.ViewGroup)settingsPanel.getParent();
+        int childIndex=parent.indexOfChild(settingsPanel);
+        android.view.ViewGroup.LayoutParams layoutParams=settingsPanel.getLayoutParams();
+        parent.removeView(settingsPanel);settingsPanel.setVisibility(View.VISIBLE);
+        ScrollView content=new ScrollView(this);content.setFillViewport(false);
+        int pad=(int)(20*getResources().getDisplayMetrics().density);content.setPadding(pad,0,pad,0);
+        content.addView(settingsPanel,new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT,ScrollView.LayoutParams.WRAP_CONTENT));
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Настройки").setView(content).setPositiveButton("Готово",null).create();
+        dialog.setOnDismissListener(d->{
+            if(settingsPanel.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)settingsPanel.getParent()).removeView(settingsPanel);
+            settingsPanel.setVisibility(View.GONE);
+            root.addView(settingsPanel,Math.min(childIndex,root.getChildCount()),layoutParams);
+        });
+        dialog.show();
+        int surface=lightTheme?Color.WHITE:Color.rgb(28,31,37);
+        int foreground=lightTheme?Color.rgb(24,29,38):Color.WHITE;
+        content.setBackgroundColor(surface);
+        settingsPanel.setBackgroundColor(surface);
+        android.view.Window window=dialog.getWindow();
+        if(window!=null){
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(surface));
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            window.setLayout((int)(getResources().getDisplayMetrics().widthPixels*0.94),Math.max(500,getResources().getDisplayMetrics().heightPixels*3/4));
+        }
+        int titleId=getResources().getIdentifier("alertTitle","id","android");
+        if(titleId==0)titleId=android.R.id.title;
+        TextView heading=dialog.findViewById(titleId);
+        if(heading!=null)heading.setTextColor(foreground);
+        Button done=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        if(done!=null)done.setTextColor(lightTheme?Color.rgb(42,91,170):Color.rgb(144,180,255));
     }
 
     String hdrezkaUrl(String original){
@@ -281,38 +472,207 @@ public class MainActivity extends Activity {
     }
     void openFilm(String original){
         int mode=prefs.getInt("openMode",0);
+        if(mode==2){
+            new AlertDialog.Builder(this).setTitle("Где открыть фильм?")
+                .setItems(new String[]{"HDRezka App","Браузер"},(d,which)->openFilmWithMode(original,which==0?1:0)).show();
+        }else openFilmWithMode(original,mode);
+    }
+    void openFilmWithMode(String original,int mode){
         String target=mode==1?hdrezkaUrl(original):original;
-        Intent view=new Intent(Intent.ACTION_VIEW,Uri.parse(target));
-        view.addCategory(Intent.CATEGORY_BROWSABLE);
+        Intent view=new Intent(Intent.ACTION_VIEW,Uri.parse(target)); view.addCategory(Intent.CATEGORY_BROWSABLE);
         try{
-            if(mode==2) startActivity(Intent.createChooser(view,"Где открыть фильм?"));
-            else startActivity(view);
+            startActivity(view);
         }catch(Exception e){
-            if(mode==1){
-                try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(original)));setStatus("HDRezka App не перехватила ссылку; открыл исходную ссылку.");}
-                catch(Exception ex){setStatus("Не удалось открыть ссылку: "+ex.getMessage());}
-            }else setStatus("Не найдено приложение для открытия ссылки: "+e.getMessage());
+            try{Intent fallback=new Intent(Intent.ACTION_VIEW,Uri.parse(original));fallback.addCategory(Intent.CATEGORY_BROWSABLE);startActivity(fallback);
+                if(mode==1)setStatus("HDRezka App не найдена; ссылка открыта в браузере.");
+            }catch(Exception ex){setStatus("Не удалось открыть ссылку: "+ex.getMessage());}
         }
     }
+    void openBatch(ArrayList<String> urls,int mode){
+        if(urls.isEmpty())return;
+        if(mode==2){
+            new AlertDialog.Builder(this).setTitle("Где открыть карточки?")
+                .setItems(new String[]{"HDRezka App","Браузер"},(d,which)->openBatchSelected(urls,which==0?1:0)).show();
+        }else openBatchSelected(urls,mode);
+    }
+    void openBatchSelected(ArrayList<String> urls,int mode){
+        if(mode==1){openFilmWithMode(urls.get(0),1);return;}
+        for(int i=0;i<urls.size();i++){final String u=urls.get(i);new android.os.Handler(getMainLooper()).postDelayed(()->openFilmWithMode(u,0),i*650L);}
+    }
+    int maximumSelectableYear(){return Math.max(2027,java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)+20);}
+    void adjustYear(int delta){
+        String raw=year.getText().toString().trim();int current;
+        try{current=Integer.parseInt(raw);}catch(Exception e){current=java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);}
+        int next=Math.max(1900,Math.min(maximumSelectableYear(),current+delta));
+        year.setText(String.valueOf(next));year.setSelection(year.length());
+    }
+    android.text.TextWatcher simpleWatcher(String key){
+        return new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}
+            public void onTextChanged(CharSequence s,int start,int before,int count){if(prefs!=null){android.content.SharedPreferences.Editor edit=prefs.edit().putString(key,s.toString());if("yearAdvanced".equals(key))edit.putString("lastYear",s.toString());if("domainAdvanced".equals(key))edit.remove("hdrezkaAuthOrigin");edit.apply();}}
+            public void afterTextChanged(android.text.Editable e){}};
+    }
 
+    String movieKey(String value){
+        String raw=value==null?"":value.trim();
+        if(raw.isEmpty())return "";
+        try{
+            Uri uri=Uri.parse(raw);String path=uri.getPath();
+            if(path==null||path.isEmpty())path=raw.split("[?#]",2)[0];
+            path=path.replaceAll("/{2,}","/").replaceAll("/+$","");
+            if(path.isEmpty())return "/";
+            return path.startsWith("/")?path:"/"+path;
+        }catch(Exception e){
+            String path=raw.replaceAll("[?#].*$","").replaceAll("/{2,}","/").replaceAll("/+$","");
+            if(path.isEmpty())return "/";
+            return path.startsWith("/")?path:"/"+path;
+        }
+    }
+    JSONObject mergeMovieRecords(JSONObject existing,JSONObject incoming){
+        try{
+            JSONObject out=new JSONObject(existing.toString());
+            String[] fields={"title","year","poster","type","typeLabel","sourcePage"};
+            for(String field:fields){
+                String old=out.optString(field,""),next=incoming.optString(field,"");
+                boolean missing=old.isEmpty()||"Без названия".equals(old)||("type".equals(field)&&"other".equals(old));
+                if(missing&&!next.isEmpty())out.put(field,next);
+            }
+            out.put("id",movieKey(out.optString("url","")));
+            return out;
+        }catch(Exception e){return existing;}
+    }
     HashSet<String> usedUrls(){
         HashSet<String> out=new HashSet<>();
-        try{for(int i=0;i<library.length();i++)out.add(library.getJSONObject(i).optString("url",""));}catch(Exception ignored){}
+        try{for(int i=0;i<library.length();i++){JSONObject item=library.getJSONObject(i);String key=movieKey(item.optString("url",""));if(!key.isEmpty())out.add(key);}}catch(Exception ignored){}
         String saved=prefs.getString("used","");
-        try{JSONArray old=new JSONArray(saved);for(int i=0;i<old.length();i++)out.add(old.getString(i));}catch(Exception ignored){}
+        try{JSONArray old=new JSONArray(saved);for(int i=0;i<old.length();i++){String key=movieKey(old.getString(i));if(!key.isEmpty())out.add(key);}}catch(Exception ignored){}
         return out;
     }
-    void loadLibrary(){try{library=new JSONArray(prefs.getString("library","[]"));}catch(Exception e){library=new JSONArray();}}
+    void loadLibrary(){
+        try{
+            JSONArray source=new JSONArray(prefs.getString("library","[]"));
+            LinkedHashMap<String,JSONObject> map=new LinkedHashMap<>();boolean changed=false;
+            for(int i=0;i<source.length();i++){
+                JSONObject raw=source.optJSONObject(i);if(raw==null)continue;
+                String url=raw.optString("url",""),key=movieKey(url);if(url.isEmpty()||key.isEmpty()||"/".equals(key))continue;
+                JSONObject item=new JSONObject(raw.toString());item.put("id",key);
+                if(map.containsKey(key)){map.put(key,mergeMovieRecords(map.get(key),item));changed=true;}
+                else map.put(key,item);
+                if(!key.equals(raw.optString("id","")))changed=true;
+            }
+            library=new JSONArray();for(JSONObject item:map.values())library.put(item);
+            if(changed||library.length()!=source.length())saveLibrary();
+        }catch(Exception e){library=new JSONArray();}
+    }
     void saveLibrary(){prefs.edit().putString("library",library.toString()).putString("used",new JSONArray(usedUrls()).toString()).apply();}
     void setStatus(String s){status.setText(s);}
+    void saveDatabasePosition(){
+        if(databaseDialog==null||!databaseDialog.isShowing())return;
+        ListView list=databaseDialog.getListView();
+        View first=list.getChildAt(0);
+        prefs.edit().putInt("databasePosition",list.getFirstVisiblePosition()).putInt("databaseOffset",first==null?0:first.getTop()).apply();
+    }
     void showDatabase(){
-        StringBuilder text=new StringBuilder("В базе: ").append(library.length()).append(" записей\n\n");
-        for(int i=library.length()-1;i>=0;i--){JSONObject x=library.optJSONObject(i);if(x!=null)text.append(x.optString("title","Без названия")).append("\n").append(x.optString("url","")).append("\n\n");}
-        new AlertDialog.Builder(this).setTitle("Моя база").setMessage(text.toString())
-            .setPositiveButton("Случайный из базы",(d,w)->openRandomSaved())
-            .setNeutralButton("Очистить базу",(d,w)->new AlertDialog.Builder(this).setMessage("Удалить всю базу и историю без повторов?")
-                .setNegativeButton("Отмена",null).setPositiveButton("Удалить",(a,b)->{library=new JSONArray();prefs.edit().putString("used","[]").apply();saveLibrary();setStatus("База и история очищены.");}).show())
-            .setNegativeButton("Закрыть",null).show();
+        if(databaseDialog!=null&&databaseDialog.isShowing())return;
+        prefs.edit().putString("lastWindow","database").apply();
+        ArrayList<JSONObject> entries=new ArrayList<>();
+        ArrayList<String> labels=new ArrayList<>();
+        for(int i=library.length()-1;i>=0;i--){
+            JSONObject item=library.optJSONObject(i);
+            if(item==null)continue;
+            entries.add(item);
+            String title=item.optString("title","Без названия");
+            String yearText=item.optString("year","");
+            String url=item.optString("url","");
+            String label=title;
+            if(!yearText.isEmpty())label+=" · "+yearText;
+            if(!url.isEmpty())label+="\n"+url;
+            labels.add(label);
+        }
+        if(entries.isEmpty())labels.add("База пока пуста.");
+        ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,labels);
+        AlertDialog.Builder builder=new AlertDialog.Builder(this).setTitle("Моя база ("+library.length()+")")
+            .setAdapter(adapter,null)
+            .setPositiveButton("Случайный из базы",null)
+            .setNeutralButton("Очистить базу",(dialog,which)->new AlertDialog.Builder(this).setMessage("Удалить всю базу и историю без повторов?")
+                .setNegativeButton("Отмена",null).setPositiveButton("Удалить",(confirm,button)->{
+                    library=new JSONArray();
+                    prefs.edit().putString("used","[]").putInt("databasePosition",0).putInt("databaseOffset",0).apply();
+                    saveLibrary();
+                    setStatus("База и история очищены.");
+                }).show())
+            .setNegativeButton("Закрыть",null);
+        final AlertDialog dialog=builder.create();
+        databaseDialog=dialog;
+        dialog.setOnDismissListener(d->{
+            if(databaseDialog==dialog){
+                databaseDialog=null;
+                if(!isChangingConfigurations())prefs.edit().putString("lastWindow","main").apply();
+            }
+        });
+        dialog.setOnShowListener(ignored->{
+            ListView list=dialog.getListView();
+            int position=Math.max(0,Math.min(prefs.getInt("databasePosition",0),labels.size()-1));
+            list.setSelectionFromTop(position,prefs.getInt("databaseOffset",0));
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{saveDatabasePosition();openRandomSaved();});
+            list.setOnItemClickListener((parent,view,which,id)->{
+                if(which<0||which>=entries.size())return;
+                String url=entries.get(which).optString("url","");
+                if(!url.isEmpty()){saveDatabasePosition();openFilm(url);}
+            });
+            list.setOnItemLongClickListener((parent,view,positionInList,id)->{
+                if(positionInList<0||positionInList>=entries.size())return true;
+                JSONObject item=entries.get(positionInList);
+                String title=item.optString("title","Без названия");
+                String url=item.optString("url","");
+                new AlertDialog.Builder(this).setTitle(title)
+                    .setItems(new String[]{"Открыть фильм","Удалить из базы"},(actionDialog,action)->{
+                        saveDatabasePosition();
+                        if(action==0){
+                            if(!url.isEmpty())openFilm(url);
+                        }else if(action==1){
+                            removeMovieFromDatabase(url);
+                            dialog.dismiss();
+                            showDatabase();
+                        }
+                    })
+                    .setNegativeButton("Отмена",null).show();
+                return true;
+            });
+        });
+        dialog.show();
+    }
+    @Override protected void onPause(){
+        if(prefs!=null&&year!=null){
+            prefs.edit().putString("yearAdvanced",year.getText().toString()).putString("lastYear",year.getText().toString()).apply();
+            saveDatabasePosition();
+        }
+        super.onPause();
+    }
+    @Override protected void onResume(){
+        super.onResume();
+        if(prefs!=null&&"database".equals(prefs.getString("lastWindow","main"))&&(databaseDialog==null||!databaseDialog.isShowing())){
+            showDatabase();
+        }
+    }
+    void removeMovieFromDatabase(String url){
+        JSONArray remaining=new JSONArray();
+        boolean removed=false;
+        String target=movieKey(url);
+        for(int i=0;i<library.length();i++){
+            JSONObject item=library.optJSONObject(i);
+            if(item==null)continue;
+            if(target.equals(movieKey(item.optString("url","")))){removed=true;continue;}
+            remaining.put(item);
+        }
+        if(!removed){setStatus("Карточка не найдена в базе.");return;}
+        HashSet<String> used=new HashSet<>(usedUrls());
+        boolean stillUsed=false;
+        for(int i=0;i<remaining.length();i++){JSONObject item=remaining.optJSONObject(i);if(item!=null&&target.equals(movieKey(item.optString("url","")))){stillUsed=true;break;}}
+        if(!stillUsed)used.remove(target);
+        library=remaining;
+        prefs.edit().putString("used",new JSONArray(used).toString()).apply();
+        saveLibrary();
+        setStatus("Карточка удалена из базы. Её можно будет выбрать снова.");
     }
     void openRandomSaved(){
         if(library.length()==0){setStatus("База пуста.");return;}
@@ -337,23 +697,52 @@ public class MainActivity extends Activity {
                 try(OutputStream out=getContentResolver().openOutputStream(uri)){out.write(content.getBytes(StandardCharsets.UTF_8));}
                 setStatus("Экспорт завершён: "+uri.getLastPathSegment());
             }else if(requestCode==PICK_IMPORT){
-                String content=readUri(uri);JSONArray incoming;
-                if(content.toLowerCase(Locale.ROOT).contains("<html")||content.contains("id='rezkery-db'")||content.contains("id=\"rezkery-db\"")){
-                    int a=content.indexOf("id='rezkery-db'");if(a<0)a=content.indexOf("id=\"rezkery-db\"");
-                    int gt=content.indexOf('>',a),end=content.indexOf("</script>",gt);
-                    if(a<0||gt<0||end<0)throw new Exception("В HTML не найдена встроенная база. Импортируй JSON, созданный приложением.");
-                    JSONObject o=new JSONObject(content.substring(gt+1,end));incoming=o.optJSONArray("items");
-                }else{JSONObject o=new JSONObject(content);incoming=o.optJSONArray("items");}
-                if(incoming==null)throw new Exception("Файл не содержит списка items.");
-                mergeLibrary(incoming);setStatus("Импорт завершён. Всего записей: "+library.length());
+                String content=readUri(uri);String trimmed=content.trim();JSONArray incoming;JSONArray importedUsed=null;
+                if(trimmed.toLowerCase(Locale.ROOT).contains("<html")){
+                    String embedded=extractEmbeddedJson(content);
+                    if(embedded==null)throw new Exception("В HTML не найдена встроенная база Rezkery Randomizer.");
+                    Object parsed=new JSONTokener(embedded).nextValue();
+                    if(parsed instanceof JSONArray)incoming=(JSONArray)parsed;
+                    else if(parsed instanceof JSONObject){JSONObject o=(JSONObject)parsed;incoming=firstArray(o,"items","movies","data");importedUsed=o.optJSONArray("used");}
+                    else throw new Exception("В HTML найдены данные неизвестного формата.");
+                }else{
+                    Object parsed=new JSONTokener(trimmed).nextValue();
+                    if(parsed instanceof JSONArray)incoming=(JSONArray)parsed;
+                    else if(parsed instanceof JSONObject){JSONObject o=(JSONObject)parsed;incoming=firstArray(o,"items","movies","data");importedUsed=o.optJSONArray("used");}
+                    else throw new Exception("Файл должен содержать JSON-массив карточек.");
+                }
+                if(incoming==null)throw new Exception("Файл не содержит списка items или movies.");
+                mergeLibrary(incoming);
+                if(importedUsed!=null){HashSet<String> used=usedUrls();for(int i=0;i<importedUsed.length();i++){String u=importedUsed.optString(i,"");if(!u.isEmpty())used.add(movieKey(u));}prefs.edit().putString("used",new JSONArray(used).toString()).apply();}
+                setStatus("Импорт завершён. Всего записей: "+library.length());
             }
         }catch(Exception e){setStatus("Не удалось обработать файл: "+e.getMessage());}
+    }
+    JSONArray firstArray(JSONObject object,String... keys){
+        for(String key:keys){JSONArray value=object.optJSONArray(key);if(value!=null)return value;}return null;
+    }
+    String extractEmbeddedJson(String html){
+        String[] ids={"rezkery-db","rezkery-data"};
+        for(String id:ids){
+            java.util.regex.Matcher m=java.util.regex.Pattern.compile("<script[^>]*id=[\\\"']"+id+"[\\\"'][^>]*>([\\s\\S]*?)</script>",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(html);
+            if(m.find())return m.group(1).trim();
+        }
+        return null;
     }
     String readUri(Uri uri)throws Exception{StringBuilder b=new StringBuilder();try(InputStream in=getContentResolver().openInputStream(uri);BufferedReader r=new BufferedReader(new InputStreamReader(in,StandardCharsets.UTF_8))){String line;while((line=r.readLine())!=null)b.append(line).append('\n');}return b.toString();}
     void mergeLibrary(JSONArray incoming)throws Exception{
         LinkedHashMap<String,JSONObject> map=new LinkedHashMap<>();
-        for(int i=0;i<library.length();i++){JSONObject x=library.optJSONObject(i);if(x!=null)map.put(x.optString("url",""),x);}
-        for(int i=0;i<incoming.length();i++){JSONObject x=incoming.optJSONObject(i);if(x!=null&&!x.optString("url","").isEmpty())map.put(x.optString("url"),x);}
+        for(int i=0;i<library.length();i++){
+            JSONObject x=library.optJSONObject(i);if(x==null)continue;
+            String key=movieKey(x.optString("url",""));if(key.isEmpty()||"/".equals(key))continue;
+            x.put("id",key);map.put(key,x);
+        }
+        for(int i=0;i<incoming.length();i++){
+            JSONObject x=incoming.optJSONObject(i);if(x==null)continue;
+            String url=x.optString("url",""),key=movieKey(url);if(url.isEmpty()||key.isEmpty()||"/".equals(key))continue;
+            x.put("id",key);
+            map.put(key,map.containsKey(key)?mergeMovieRecords(map.get(key),x):x);
+        }
         library=new JSONArray();for(JSONObject x:map.values())library.put(x);saveLibrary();
     }
     void githubDialog(){
@@ -366,6 +755,330 @@ public class MainActivity extends Activity {
                 if(t.isEmpty()){setStatus("Нужен GitHub token с разрешением gist.");return;}
                 prefs.edit().putString("ghToken",t).putString("ghGist",g).apply();syncGithub(t,g);
             }).show();
+    }
+    String configuredMirrorOrigin(){
+        String configured=domain.getText().toString().trim();
+        if(configured.isEmpty())configured=prefs.getString("domainAdvanced","https://rezkery.com");
+        if(!configured.matches("(?i)^https?://.*"))configured="https://"+configured;
+        return configured.replaceAll("/+$","");
+    }
+    String openLoginFormScript(){
+        return "(function(){"+
+            "const visible=e=>!!(e&&e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden');"+
+            "const forms=[...document.querySelectorAll('input[type=password]')];if(forms.some(visible))return 'form';"+
+            "const els=[...document.querySelectorAll('a,button,[role=button],[onclick]')].filter(visible);"+
+            "const re=/(войти|вход|авторизац|sign.?in|log.?in)/i;"+
+            "let e=els.find(x=>re.test((x.innerText||'')+' '+(x.getAttribute('aria-label')||'')+' '+(x.getAttribute('title')||'')));"+
+            "if(!e)e=els.find(x=>/login|auth|account/i.test((x.getAttribute('href')||'')+' '+x.className));"+
+            "if(e){const href=e.getAttribute('href');if(href&&!href.startsWith('#')&&!/^javascript:/i.test(href)&&!(/login|auth/i.test(location.href)))location.href=e.href;else e.click();return 'opened';}"+
+            "return 'missing';})()";
+    }
+    JSONObject jsonFromEvaluate(String value)throws Exception{
+        Object decoded=new JSONTokener(value==null?"":value).nextValue();
+        if(decoded instanceof JSONObject)return (JSONObject)decoded;
+        if(decoded instanceof String){
+            String text=((String)decoded).trim();
+            if(text.isEmpty()||"null".equalsIgnoreCase(text))throw new JSONException("WebView вернул пустой ответ.");
+            return new JSONObject(text);
+        }
+        throw new JSONException("Ответ WebView ещё не готов или имеет неверный формат.");
+    }
+    void pollLoginResult(WebView target,EditText password,TextView label,CookieManager cookieManager,int attempt){
+        if(attempt>450){label.setText("HDRezka не ответила за 90 секунд. Проверь соединение и зеркало.");return;}
+        target.evaluateJavascript("window.__rzkLoginResult||null",value->{
+            if(value==null||"null".equals(value)){
+                new android.os.Handler(getMainLooper()).postDelayed(()->pollLoginResult(target,password,label,cookieManager,attempt+1),200);
+                return;
+            }
+            try{
+                JSONObject answer=jsonFromEvaluate(value);
+                if(answer.optBoolean("ok")){
+                    cookieManager.flush();password.setText("");
+                    String activeOrigin=originFromUrl(target.getUrl());
+                    if(!activeOrigin.isEmpty())prefs.edit().putString("hdrezkaAuthOrigin",activeOrigin).apply();
+                    label.setText("Вход подтверждён. Теперь можно синхронизировать папку RANDOM.");
+                    target.loadUrl((activeOrigin.isEmpty()?configuredMirrorOrigin():activeOrigin)+"/favorites/");
+                }else label.setText("Вход не подтверждён: "+answer.optString("error","проверь логин и пароль."));
+            }catch(Exception e){label.setText("Не удалось прочитать ответ входа: "+e.getMessage());}
+        });
+    }
+    void hdrezkaSyncDialog(){
+        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);
+        int pad=(int)(16*getResources().getDisplayMetrics().density);
+        box.setPadding(pad,pad,pad,0);
+        TextView hint=new TextView(this);
+        hint.setText("Войди в аккаунт HDRezka здесь. Поля ниже используют клавиатуру Android; после входа синхронизация загрузит папку RANDOM в базу и добавит в неё отсутствующие карточки.");
+        hint.setPadding(0,0,0,pad/2);hint.setTextColor(lightTheme?Color.rgb(76,86,102):Color.rgb(174,181,193));box.addView(hint);
+        EditText loginName=new EditText(this);
+        loginName.setHint("Логин или электронная почта");
+        loginName.setSingleLine(true);
+        loginName.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        loginName.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_NEXT);
+        loginName.setShowSoftInputOnFocus(true);
+        int inputFg=lightTheme?Color.rgb(24,29,38):Color.WHITE,inputHint=lightTheme?Color.rgb(76,86,102):Color.rgb(174,181,193);
+        loginName.setTextColor(inputFg);loginName.setHintTextColor(inputHint);loginName.setBackgroundTintList(android.content.res.ColorStateList.valueOf(inputHint));
+        box.addView(loginName,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT));
+        EditText loginPassword=new EditText(this);
+        loginPassword.setHint("Пароль HDRezka");
+        loginPassword.setSingleLine(true);
+        loginPassword.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        loginPassword.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        loginPassword.setShowSoftInputOnFocus(true);
+        loginPassword.setTextColor(inputFg);loginPassword.setHintTextColor(inputHint);loginPassword.setBackgroundTintList(android.content.res.ColorStateList.valueOf(inputHint));
+        box.addView(loginPassword,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT));
+        Button loginButton=new Button(this);loginButton.setText("ВОЙТИ В HDREZKA");box.addView(loginButton);
+        TextView pageStatus=new TextView(this);pageStatus.setText("Открой страницу зеркала или войди через поля выше.");pageStatus.setPadding(0,pad/3,0,pad/2);pageStatus.setTextColor(lightTheme?Color.rgb(76,86,102):Color.rgb(174,181,193));box.addView(pageStatus);
+        ProgressBar progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(100);progress.setProgress(0);progress.setVisibility(View.GONE);box.addView(progress);
+        WebView loginWeb=new WebView(this);
+        loginWeb.setFocusable(true);loginWeb.setFocusableInTouchMode(true);
+        loginWeb.getSettings().setJavaScriptEnabled(true);loginWeb.getSettings().setDomStorageEnabled(true);
+        loginWeb.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);loginWeb.getSettings().setSupportMultipleWindows(false);
+        loginWeb.getSettings().setUseWideViewPort(true);loginWeb.getSettings().setLoadWithOverviewMode(true);
+        loginWeb.getSettings().setBuiltInZoomControls(true);loginWeb.getSettings().setDisplayZoomControls(false);loginWeb.getSettings().setTextZoom(100);
+        String browserAgent=loginWeb.getSettings().getUserAgentString();loginWeb.getSettings().setUserAgentString(browserAgent.replace("; wv",""));
+        CookieManager cookieManager=CookieManager.getInstance();cookieManager.setAcceptCookie(true);
+        if(android.os.Build.VERSION.SDK_INT>=21)cookieManager.setAcceptThirdPartyCookies(loginWeb,true);
+        loginWeb.setWebChromeClient(new WebChromeClient());
+        boolean[] loginPageReady={false};
+        loginWeb.setWebViewClient(new WebViewClient(){
+            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){pageStatus.setText("Загрузка страницы HDRezka…");}
+            @Override public void onPageFinished(WebView view,String url){
+                loginPageReady[0]=true;cookieManager.flush();
+                view.evaluateJavascript("(document.title+' '+(document.body?document.body.innerText:'' )).slice(0,2500)",value->{
+                    String pageText="";
+                    try{Object decoded=new JSONTokener(value==null?"":value).nextValue();pageText=String.valueOf(decoded).toLowerCase(Locale.ROOT);}catch(Exception ignored){}
+                    if(pageText.matches("(?s).*(anubis|cloudflare|captcha|провер(ка|ьте).*человек|подтвердите.*человек).*")){
+                        pageStatus.setText("Сайт запросил проверку на бота. Пройди её в окне и дождись загрузки страницы.");
+                        return;
+                    }
+                    view.evaluateJavascript(openLoginFormScript(),result->{
+                        String outcome="";
+                        try{Object decoded=new JSONTokener(result==null?"":result).nextValue();outcome=String.valueOf(decoded);}catch(Exception ignored){}
+                        if("opened".equals(outcome)||"form".equals(outcome))pageStatus.setText("Если клавиатура в WebView не появляется, введи данные в поля Android выше.");
+                        else if(url.contains("/favorites/"))pageStatus.setText("Открыл страницу закладок HDRezka.");
+                        else pageStatus.setText("Введи данные в поля Android выше или открой форму входа на странице.");
+                    });
+                });
+            }
+        });
+        int webHeight=(int)(320*getResources().getDisplayMetrics().density);
+        box.addView(loginWeb,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,webHeight));
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(box);
+        boolean[] webDestroyed={false},syncRunning={false};
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Вход и закладки HDRezka").setView(scroll)
+            .setNegativeButton("Закрыть",(d,w)->{webDestroyed[0]=true;loginWeb.stopLoading();loginWeb.destroy();})
+            .setNeutralButton("Импорт + синхронизация",null).create();
+        dialog.setOnShowListener(d->{
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{
+                if(syncRunning[0])return;
+                if(!loginPageReady[0]){pageStatus.setText("Подожди, пока загрузится страница HDRezka.");return;}
+                syncRunning[0]=true;progress.setVisibility(View.VISIBLE);progress.setIndeterminate(true);
+                pageStatus.setText("Загружаю папку RANDOM…");
+                startHdrezkaSync(loginWeb,dialog,pageStatus,progress,syncRunning,true);
+            });
+            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+            int surface=lightTheme?Color.WHITE:Color.rgb(28,31,37),fg=lightTheme?Color.rgb(24,29,38):Color.WHITE;
+            scroll.setBackgroundColor(surface);box.setBackgroundColor(surface);
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(surface));
+            int dialogTitleId=getResources().getIdentifier("alertTitle","id","android");
+            if(dialogTitleId==0)dialogTitleId=android.R.id.title;
+            TextView dialogTitle=dialog.findViewById(dialogTitleId);if(dialogTitle!=null)dialogTitle.setTextColor(fg);
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setTextColor(lightTheme?Color.rgb(42,91,170):Color.rgb(144,180,255));
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(lightTheme?Color.rgb(42,91,170):Color.rgb(144,180,255));
+            int maxHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.84);
+            dialog.getWindow().setLayout(LinearLayout.LayoutParams.MATCH_PARENT,maxHeight);
+        });
+        dialog.setOnDismissListener(d->{if(!webDestroyed[0]){webDestroyed[0]=true;loginWeb.stopLoading();loginWeb.destroy();}});
+        loginButton.setOnClickListener(v->{
+            String user=loginName.getText().toString(),password=loginPassword.getText().toString();
+            if(user.trim().isEmpty()||password.isEmpty()){pageStatus.setText("Введи логин и пароль.");return;}
+            if(!loginPageReady[0]){pageStatus.setText("Подожди, пока загрузится страница HDRezka.");return;}
+            pageStatus.setText("Проверяю вход…");
+            loginWeb.evaluateJavascript(loginRequestScript(user,password),ignored->pollLoginResult(loginWeb,loginPassword,pageStatus,cookieManager,0));
+        });
+        dialog.show();
+        int maxHeight=(int)(getResources().getDisplayMetrics().heightPixels*0.84);
+        dialog.getWindow().setLayout(LinearLayout.LayoutParams.MATCH_PARENT,maxHeight);
+        loginWeb.loadUrl(bookmarkOrigin()+"/");
+    }
+    String originFromUrl(String value){
+        try{
+            Uri uri=Uri.parse(value);
+            String scheme=uri.getScheme(),authority=uri.getAuthority();
+            if(uri.getHost()==null||scheme==null||(!scheme.equalsIgnoreCase("http")&&!scheme.equalsIgnoreCase("https")))return "";
+            return scheme+"://"+authority;
+        }catch(Exception e){return "";}
+    }
+    String bookmarkOrigin(){
+        String saved=prefs.getString("hdrezkaAuthOrigin","");
+        return saved.isEmpty()?configuredMirrorOrigin():saved;
+    }
+    String loginRequestScript(String username,String password){
+        String user=JSONObject.quote(username),pass=JSONObject.quote(password);
+        int pause=Math.max(1000,prefs.getInt("requestIntervalSeconds",2)*1000);
+        return "window.__rzkLoginResult=null;(async function(){try{const body=new URLSearchParams({login_name:"+user+",login_password:"+pass+",login_not_save:'0'});"+
+            "const r=await fetch(new URL('/ajax/login/',location.origin),{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:body.toString()});"+
+            "const t=await r.text();let parsed;try{parsed=JSON.parse(t)}catch(e){}const j=parsed&&typeof parsed==='object'?parsed:{};if(!r.ok||j.success===false)return JSON.stringify({ok:false,error:j.message||('HTTP '+r.status)});"+
+            "await new Promise(resolve=>setTimeout(resolve,"+pause+"));const f=await fetch(new URL('/favorites/',location.origin),{credentials:'include',redirect:'follow'});const h=await f.text();"+
+            "const ok=(j.success===true||j.success===1||j.success==='true'||/b-favorites_content__cats_list_link/.test(h))&&!/(Войти в аккаунт|Вход в аккаунт)/i.test(h);"+
+            "return JSON.stringify({ok:ok,error:ok?'':'HDRezka не подтвердила авторизацию; проверь логин, пароль и адрес зеркала.'})"+
+            "}catch(e){return JSON.stringify({ok:false,error:String(e.message||e)})}})().then(function(value){window.__rzkLoginResult=value});true";
+    }
+    String buildHdrezkaSyncScript(boolean upload,JSONArray movies,int delayMs,boolean useCurrentPage){
+        String movieJson=movies==null?"[]":movies.toString();
+        String script=
+            "window.__rzkSyncResult=null;(async function(){"+
+            "const P=window.__rzkSyncProgress={phase:'Подготовка',done:0,total:0};try{"+
+            "const movies="+movieJson+";"+"const useCurrentPage="+useCurrentPage+";"+
+            "const rateMs="+Math.max(1000,delayMs)+";"+
+            "let lastRequest="+(useCurrentPage?"Date.now()":"0")+";"+
+            "const uploadEnabled="+upload+";"+
+            "const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));"+
+            "const rate=async()=>{if(lastRequest){const left=rateMs-(Date.now()-lastRequest);if(left>0)await wait(left)}lastRequest=Date.now()};"+
+            "const hasChallenge=value=>{const text=String(value||'').toLowerCase();return ['anubis','cloudflare','cdn-cgi/challenge','captcha','checking your browser','just a moment','проверьте, что вы человек','подтвердите, что вы человек'].some(part=>text.includes(part))};"+
+            "const get=async url=>{await rate();const response=await fetch(String(url),{credentials:'include',redirect:'follow'});const text=await response.text();if(hasChallenge(text))throw new Error('HDRezka показала проверку защиты. Запросы остановлены; пройди проверку вручную.');if(!response.ok)throw new Error('HTTP '+response.status);return text};"+
+            "const post=async data=>{await rate();const response=await fetch(new URL('/ajax/favorites/',location.origin).href,{method:'POST',credentials:'include',headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},body:new URLSearchParams(data).toString()});const text=await response.text();if(hasChallenge(text))throw new Error('HDRezka показала проверку защиты. Запросы остановлены; пройди проверку вручную.');let result;try{result=JSON.parse(text)}catch(e){throw new Error('Ответ HDRezka не является JSON. Проверь вход и адрес зеркала.')}if(!result||typeof result!=='object')throw new Error('HDRezka вернула пустой ответ на запрос закладок.');const success=result.success;if(!response.ok||success===false||success===0||success==='0'||success==='false')throw new Error(result.message||result.error||('Ошибка закладок HTTP '+response.status));return result};"+
+            "const digits=value=>{const text=String(value||'');return text.length>0&&Array.from(text).every(ch=>ch>='0'&&ch<='9')};"+
+            "const absolute=(value,base)=>{try{return new URL(value,base).href}catch(e){return ''}};"+
+            "const catFrom=(html,base)=>{const doc=new DOMParser().parseFromString(html,'text/html');let id='';doc.querySelectorAll('a.b-favorites_content__cats_list_link').forEach(link=>{const name=(link.querySelector('.name')||link).textContent.trim().toUpperCase();const href=absolute(link.getAttribute('href')||'',base);let parts=[];try{parts=new URL(href).pathname.split('/').filter(Boolean)}catch(e){}const candidate=parts[0]==='favorites'?(parts[1]||''):'';if((name==='RANDOM'||name.startsWith('RANDOM '))&&digits(candidate))id=candidate});return id};"+
+            "const yearFrom=value=>{const text=String(value||'');let found='';for(let i=0;i+3<text.length;i++){const year=text.slice(i,i+4);if((year.startsWith('19')||year.startsWith('20')||year.startsWith('21'))&&digits(year))found=year}return found};"+
+            "const parse=(html,base)=>{const doc=new DOMParser().parseFromString(html,'text/html'),items=[],seen=new Set();let max=1;doc.querySelectorAll('.b-content__inline_item').forEach(node=>{const link=node.querySelector('.b-content__inline_item-link a[href]')||node.querySelector('a[href]');if(!link)return;const url=absolute(link.getAttribute('href')||'',base);if(!url||seen.has(url))return;seen.add(url);const titleNode=node.querySelector('.b-content__inline_item-link');const title=(titleNode?titleNode.textContent:link.textContent||'Без названия').trim();const image=node.querySelector('.b-content__inline_item-cover img');const poster=image?absolute(image.getAttribute('src')||'',base):'';const pageUrl=new URL(url);const path=pageUrl.pathname.toLowerCase();const type=path.includes('/films/')?'film':path.includes('/series/')?'series':path.includes('/cartoons/')||path.includes('/multfil')?'cartoon':path.includes('/anime/')?'anime':'other';items.push({url:url,title:title,year:yearFrom(title)||yearFrom(url),poster:poster,type:type,domain:location.origin})});doc.querySelectorAll('a[href]').forEach(link=>{const href=absolute(link.getAttribute('href')||'',base);if(!href)return;try{const page=new URL(href);const parts=page.pathname.split('/').filter(Boolean);const index=parts.lastIndexOf('page');if(index>=0&&digits(parts[index+1]))max=Math.max(max,parseInt(parts[index+1],10)||1);const queryPage=page.searchParams.get('page');if(digits(queryPage))max=Math.max(max,parseInt(queryPage,10)||1)}catch(e){}});return{items:items,max:max}};"+
+            "P.phase='Открываю закладки HDRezka';const homeUrl=new URL('/favorites/',location.origin).href;let home=useCurrentPage?document.documentElement.outerHTML:await get(homeUrl);const homeBase=useCurrentPage?location.href:homeUrl;"+
+            "let cat=catFrom(home,homeBase);if(!cat){const lower=home.toLowerCase();if(lower.includes('type=\"password\"')||lower.includes('login_name')||lower.includes('войти в аккаунт')||lower.includes('вход в аккаунт'))throw new Error('HDRezka вернула форму входа. Заново войди в аккаунт в этом окне.');if(!uploadEnabled)return JSON.stringify({ok:true,noFolder:true,items:[],added:0,skipped:0});"+
+            "P.phase='Создаю папку RANDOM';const created=await post({action:'add_cat',name:'RANDOM'});cat=String(created.id||(created.data&&created.data.id)||'');if(!cat){home=await get(homeUrl);cat=catFrom(home,homeUrl)}if(!cat)throw new Error('HDRezka не вернула идентификатор папки RANDOM.')}"+
+            "const collectionUrl=new URL('/favorites/'+encodeURIComponent(cat)+'/',location.origin).href;P.phase='Читаю папку RANDOM';const first=await get(collectionUrl);const firstPage=parse(first,collectionUrl);const items=new Map();firstPage.items.forEach(item=>items.set(item.url,item));const max=Math.max(1,Math.min(firstPage.max,1000));"+
+            "P.phase='Импорт папки RANDOM';P.total=max;P.done=1;for(let page=2;page<=max;page++){const pageUrl=new URL('/favorites/'+encodeURIComponent(cat)+'/page/'+page+'/',location.origin).href;const html=await get(pageUrl);const data=parse(html,pageUrl);data.items.forEach(item=>items.set(item.url,item));P.done=page}"+
+            "const imported=Array.from(items.values()),ids=new Set(),urls=new Set();const postId=value=>{try{const parts=new URL(value).pathname.split('/').filter(Boolean);for(let i=parts.length-1;i>=0;i--){const segment=parts[i],dash=segment.indexOf('-');if(dash<1)continue;const candidate=segment.slice(0,dash);if(digits(candidate))return candidate}return ''}catch(e){return ''}};imported.forEach(item=>{urls.add(item.url);const id=postId(item.url);if(id)ids.add(id)});"+
+            "let added=0,skipped=0,failed=[];if(uploadEnabled){P.phase='Добавляю отсутствующие карточки';P.done=0;P.total=movies.length;for(let i=0;i<movies.length;i++){const item=movies[i],id=postId(item.url||'');P.done=i+1;if(!item.url||!id){failed.push((item.title||item.url||'карточка')+': не удалось определить ссылку или ID');continue}if(urls.has(absolute(item.url,location.origin))||ids.has(id)){skipped++;continue}try{await post({action:'add_post',post_id:id,cat_id:cat});urls.add(absolute(item.url,location.origin));ids.add(id);added++}catch(error){failed.push((item.title||id)+': '+String(error.message||error))}}}"+
+            "return JSON.stringify({ok:true,noFolder:false,items:imported,added:added,skipped:skipped,failed:failed})"+
+            "}catch(error){return JSON.stringify({ok:false,error:String(error.message||error)})}})().then(value=>{window.__rzkSyncResult=value});true";
+        return script;
+    }
+    void pollHdrezkaProgress(WebView target,TextView label,ProgressBar bar,boolean[] active){
+        if(!active[0])return;
+        target.evaluateJavascript("JSON.stringify(window.__rzkSyncProgress||{})",value->{
+            if(!active[0])return;
+            try{
+                Object decoded=new JSONTokener(value==null?"":value).nextValue();
+                JSONObject p=new JSONObject(String.valueOf(decoded));
+                int total=p.optInt("total",0),done=p.optInt("done",0);
+                label.setText(p.optString("phase","Синхронизация…")+(total>0?" — "+Math.min(done,total)+" из "+total:"…"));
+                bar.setIndeterminate(total<=0);
+                if(total>0)bar.setProgress((int)(100L*Math.min(done,total)/Math.max(1,total)));
+            }catch(Exception ignored){}
+            new android.os.Handler(getMainLooper()).postDelayed(()->pollHdrezkaProgress(target,label,bar,active),500);
+        });
+    }
+    void pollHdrezkaSyncResult(WebView target,TextView label,ProgressBar bar,boolean[] active,int attempt){
+        if(!active[0])return;
+        if(attempt>1800){active[0]=false;bar.setIndeterminate(false);label.setText("Синхронизация остановлена по тайм-ауту.");return;}
+        target.evaluateJavascript("window.__rzkSyncResult||null",value->{
+            if(!active[0])return;
+            if(value==null||"null".equals(value)){
+                new android.os.Handler(getMainLooper()).postDelayed(()->pollHdrezkaSyncResult(target,label,bar,active,attempt+1),500);return;
+            }
+            active[0]=false;bar.setIndeterminate(false);
+            try{
+                JSONObject result=jsonFromEvaluate(value);
+                if(!result.optBoolean("ok")){
+                    String error=result.optString("error","не удалось выполнить синхронизацию.");
+                    if(error.contains("проверку защиты")){
+                        long cooldown=Math.max(1,prefs.getInt("protectionCooldownMinutes",15));
+                        prefs.edit().putLong("protectionCooldownUntil",System.currentTimeMillis()+cooldown*60L*1000L).apply();
+                        error+=" Новые запросы приостановлены на "+cooldown+" мин.";
+                    }
+                    label.setText("Ошибка: "+error);setStatus("HDRezka: "+error);return;
+                }
+                JSONArray incoming=result.optJSONArray("items");int before=library.length();
+                if(incoming!=null&&incoming.length()>0)mergeLibrary(incoming);
+                int imported=Math.max(0,library.length()-before);
+                String message=result.optBoolean("noFolder")?"Папка RANDOM на HDRezka не найдена. Создай её или запусти синхронизацию ещё раз.":"Импортировано в базу: "+imported+". В папку RANDOM добавлено: "+result.optInt("added")+", уже было: "+result.optInt("skipped")+".";
+                JSONArray failed=result.optJSONArray("failed");if(failed!=null&&failed.length()>0)message+=" Ошибки: "+failed.optString(0);
+                label.setText(message);setStatus(message);
+            }catch(Exception e){label.setText("Не удалось прочитать ответ HDRezka: "+e.getMessage());}
+        });
+    }
+    void startHdrezkaSync(WebView target,AlertDialog dialog,TextView label,ProgressBar bar,boolean[] active,boolean upload){
+        long cooldownUntil=prefs.getLong("protectionCooldownUntil",0L);
+        if(System.currentTimeMillis()<cooldownUntil){
+            long left=Math.max(1,(cooldownUntil-System.currentTimeMillis()+59999L)/60000L);
+            label.setText("Пауза после проверки защиты — ещё примерно "+left+" мин.");
+            bar.setVisibility(View.GONE);active[0]=false;return;
+        }
+        JSONArray movies=new JSONArray();
+        if(upload)for(int i=0;i<library.length();i++){
+            JSONObject item=library.optJSONObject(i);
+            if(item!=null)try{JSONObject movie=new JSONObject();movie.put("url",item.optString("url",""));movie.put("title",item.optString("title",""));movies.put(movie);}catch(Exception ignored){}
+        }
+        int delay=Math.max(1,prefs.getInt("requestIntervalSeconds",2))*1000;
+        String script=buildHdrezkaSyncScript(upload,movies,delay,false);
+        pollHdrezkaProgress(target,label,bar,active);
+        target.evaluateJavascript(script,result->{
+            if(result==null||"null".equals(result)){
+                active[0]=false;bar.setIndeterminate(false);
+                String error="Не удалось запустить сценарий синхронизации в WebView.";
+                label.setText(error);setStatus(error);return;
+            }
+            pollHdrezkaSyncResult(target,label,bar,active,0);
+        });
+    }
+    void pollAutoImportResult(WebView target,android.view.ViewGroup root,int attempt){
+        if(attempt>1800){setStatus("Автоимпорт HDRezka остановлен по тайм-ауту.");cleanupAutoImportWeb(target,root);return;}
+        target.evaluateJavascript("window.__rzkSyncResult||null",value->{
+            if(value==null||"null".equals(value)){
+                new android.os.Handler(getMainLooper()).postDelayed(()->pollAutoImportResult(target,root,attempt+1),500);return;
+            }
+            try{
+                JSONObject result=jsonFromEvaluate(value);
+                if(result.optBoolean("ok")){
+                    JSONArray incoming=result.optJSONArray("items");int before=library.length();
+                    if(incoming!=null&&incoming.length()>0)mergeLibrary(incoming);
+                    int added=Math.max(0,library.length()-before);
+                    setStatus(result.optBoolean("noFolder")?"Автоимпорт: папка RANDOM ещё не создана.":"Автоимпорт RANDOM завершён: добавлено в базу "+added+" новых карточек.");
+                }else{
+                    String error=result.optString("error","ошибка чтения закладок.");
+                    if(error.contains("проверку защиты")){
+                        long cooldown=Math.max(1,prefs.getInt("protectionCooldownMinutes",15));
+                        prefs.edit().putLong("protectionCooldownUntil",System.currentTimeMillis()+cooldown*60L*1000L).apply();
+                    }
+                    setStatus("Автоимпорт HDRezka остановлен: "+error);
+                }
+            }catch(Exception e){setStatus("Автоимпорт HDRezka: "+e.getMessage());}
+            finally{cleanupAutoImportWeb(target,root);}
+        });
+    }
+    void cleanupAutoImportWeb(WebView target,android.view.ViewGroup root){
+        if(target.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)target.getParent()).removeView(target);
+        target.stopLoading();target.destroy();
+    }
+    void maybeAutoSyncBookmarks(){
+        if(!prefs.getBoolean("autoSyncBookmarks",false))return;
+        long now=System.currentTimeMillis(),last=prefs.getLong("lastAutoBookmarkSync",0L);
+        if(now-last<6L*60L*60L*1000L)return;
+        long cooldownUntil=prefs.getLong("protectionCooldownUntil",0L);
+        if(now<cooldownUntil)return;
+        String origin=bookmarkOrigin();
+        String cookies=CookieManager.getInstance().getCookie(origin);
+        if(cookies==null||cookies.isEmpty())return;
+        prefs.edit().putLong("lastAutoBookmarkSync",now).apply();
+        setStatus("Автоматически проверяю папку RANDOM…");
+        LinearLayout root=findViewById(R.id.root);WebView syncWeb=new WebView(this);
+        syncWeb.getSettings().setJavaScriptEnabled(true);syncWeb.getSettings().setDomStorageEnabled(true);
+        String ua=syncWeb.getSettings().getUserAgentString();syncWeb.getSettings().setUserAgentString(ua.replace("; wv",""));
+        CookieManager cookiesManager=CookieManager.getInstance();cookiesManager.setAcceptCookie(true);
+        if(android.os.Build.VERSION.SDK_INT>=21)cookiesManager.setAcceptThirdPartyCookies(syncWeb,true);
+        syncWeb.setVisibility(View.INVISIBLE);root.addView(syncWeb,new LinearLayout.LayoutParams(1,1));
+        boolean[] finished={false};
+        syncWeb.setWebViewClient(new WebViewClient(){
+            @Override public void onPageFinished(WebView view,String url){
+                if(finished[0])return;finished[0]=true;
+                int delay=Math.max(1,prefs.getInt("requestIntervalSeconds",2))*1000;
+                String script=buildHdrezkaSyncScript(false,new JSONArray(),delay,true);
+                view.evaluateJavascript(script,ignored->pollAutoImportResult(view,root,0));
+            }
+        });
+        syncWeb.loadUrl(origin+"/favorites/");
     }
     void syncGithub(String token,String gistId){
         setStatus("Синхронизация с GitHub…");

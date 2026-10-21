@@ -7,7 +7,26 @@ on:
   workflow_dispatch:
 
 jobs:
+  changed:
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.filter.outputs.android }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+      - id: filter
+        shell: bash
+        run: |
+          if git diff-tree --root --no-commit-id --name-only -r HEAD | grep -q '^android/'; then
+            echo "android=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "android=false" >> "$GITHUB_OUTPUT"
+          fi
   build:
+    needs: changed
+    if: needs.changed.outputs.android == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

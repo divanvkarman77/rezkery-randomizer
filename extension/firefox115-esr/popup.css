@@ -70,3 +70,15 @@ td:last-child { width: 24px; text-align: right; }
 body.busy .primary, body.busy .secondary, body.busy .danger { opacity: .55; }
 
 .top-actions{display:flex;align-items:center;gap:7px}.icon-btn{width:32px;height:30px;padding:0;border:1px solid #343b48;border-radius:8px;background:#242a34;color:#e9edf3;font-size:17px;line-height:1}.icon-btn:hover{background:#303744}.settings-panel{display:none;padding:14px;background:#181b22;border-bottom:1px solid #303641}.settings-panel.active{display:block}.settings-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.settings-panel label{display:flex;flex-direction:column;gap:6px;color:#aeb5c1;font-size:11px}.settings-panel input{width:100%;font-size:13px}.settings-actions{display:flex;gap:8px;margin:10px 0}.settings-actions button{flex:1}.settings-panel .muted{margin-top:4px}
+
+.task-progress{margin:0 0 12px;padding:12px;border:1px solid #40506a;border-radius:10px;background:#1a2230;color:#eff4ff}
+.task-progress[hidden]{display:none}
+.task-progress-head{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px}
+.task-progress-head span{color:#aebbd0;white-space:nowrap}
+#randomProgressDetail{margin-top:6px;color:#aab4c5}
+.progress-track{height:5px;margin-top:9px;overflow:hidden;border-radius:5px;background:#303949}
+.progress-track span{display:block;height:100%;width:0;border-radius:inherit;background:#78a9ff;transition:width .2s ease}
+.progress-track span.indeterminate{animation:random-progress 1.2s ease-in-out infinite}
+@keyframes random-progress{0%{transform:translateX(-110%)}100%{transform:translateX(300%)}}
+
+.selected-batch{outline:2px solid #78a9ff;outline-offset:1px}

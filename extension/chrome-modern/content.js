@@ -230,60 +230,140 @@
   }
 
   function extractPagination(kind, year) {
-    var anchors = document.querySelectorAll('a[href]');
-    var max = 1;
-    var pages = [];
-    var yearRe = year ? new RegExp('^/year/' + year + '/page/(\\d+)/?$') : null;
-    var genericRe = /^\/page\/(\\d+)\/?$/;
     var currentGenre = queryValue(location.href, 'genre');
     var currentFilter = queryValue(location.href, 'filter');
 
-    function inScope(u) {
-      if (!sameSite(u)) return false;
-      if (queryValue(u, 'genre') !== currentGenre) return false;
-      if (currentFilter && queryValue(u, 'filter') !== currentFilter) return false;
-      return true;
+    function pageBase(url) {
+      try {
+        return new URL(url, location.href).pathname
+          .replace(/\/page\/\d+\/?$/i, '')
+          .replace(/\/+$/, '') || '/';
+      } catch (e) { return ''; }
     }
 
-    for (var i = 0; i < anchors.length; i++) {
-      var a = anchors[i];
-      var u = absUrl(a.getAttribute('href'));
-      if (!inScope(u)) continue;
-      var p = pathOf(u);
-      var m = null;
-      if (kind === 'year' && yearRe) m = p.match(yearRe);
-      else if (kind === 'catalog') m = p.match(genericRe);
-      if (m) {
-        var n = Number(m[1]);
-        if (n > max) max = n;
-        pages.push(n);
+    function pageNumber(url) {
+      try {
+        var u = new URL(url, location.href);
+        var m = u.pathname.match(/\/page\/(\d+)\/?$/i);
+        if (m) return Number(m[1]);
+        var q = Number(u.searchParams.get('page')) || 0;
+        return q > 0 ? q : 0;
+      } catch (e) { return 0; }
+    }
+
+    function inScope(url, base) {
+      if (!url || !sameSite(url)) return false;
+      var u;
+      try { u = new URL(url, location.href); } catch (e) { return false; }
+      if (pageBase(u.href) !== base) return false;
+      var genre = u.searchParams.get('genre') || '';
+      var filter = u.searchParams.get('filter') || '';
+      return (!genre || !currentGenre || genre === currentGenre) &&
+        (!filter || !currentFilter || filter === currentFilter);
+    }
+
+    var current = pageNumber(location.href) || 1;
+    var base = pageBase(location.href);
+    var max = current;
+    var pages = [current];
+    var nextUrl = '';
+    var lastUrl = '';
+    var containers = document.querySelectorAll('.b-navigation, .pagination, .pagenavi, .navigation');
+    var roots = containers.length ? Array.prototype.slice.call(containers) : [document];
+    var seen = Object.create(null);
+
+    function markerOf(a) {
+      return ((a.className || '') + ' ' + (a.getAttribute('rel') || '') + ' ' +
+        (a.getAttribute('title') || '') + ' ' + (a.getAttribute('aria-label') || '') + ' ' +
+        ((a.parentElement && a.parentElement.className) || '') + ' ' +
+        cleanText(a.textContent)).toLowerCase();
+    }
+
+    roots.forEach(function (root) {
+      var links = root.querySelectorAll('a[href]');
+      var localPages = [];
+      var localMaxAnchor = null;
+      var localMax = current;
+      var explicitLast = null;
+
+      for (var i = 0; i < links.length; i++) {
+        var a = links[i];
+        var href = absUrl(a.getAttribute('href'));
+        if (!inScope(href, base)) continue;
+        var n = pageNumber(href);
+        if (!n) {
+          var label = cleanText(a.textContent);
+          if (/^\d+$/.test(label)) n = Number(label);
+        }
+        var marker = markerOf(a);
+        if (/rel=.?next|\bnext\b|следующ|далее/.test(marker)) nextUrl = href || nextUrl;
+        if (/rel=.?last|\blast\b|послед|посл\.?$/.test(marker)) explicitLast = href || explicitLast;
+        if (n > 0) {
+          localPages.push(n);
+          pages.push(n);
+          if (n > localMax) { localMax = n; localMaxAnchor = a; }
+          if (n > max) max = n;
+        }
+      }
+
+      if (explicitLast) {
+        lastUrl = explicitLast;
+        max = Math.max(max, pageNumber(explicitLast));
+        return;
+      }
+
+      var ellipsis = root.querySelector('.nav_ext, .ellipsis, .pagination-ellipsis');
+      var lastFollowsEllipsis = !!(ellipsis && localMaxAnchor &&
+        (ellipsis.compareDocumentPosition(localMaxAnchor) & 4));
+      var unique = Object.create(null);
+      localPages.forEach(function (n) { unique[n] = 1; });
+      var contiguous = true;
+      for (var n = 1; n <= localMax; n++) {
+        if (!unique[n] && n !== current) { contiguous = false; break; }
+      }
+      if (localMaxAnchor && (lastFollowsEllipsis || contiguous)) {
+        lastUrl = absUrl(localMaxAnchor.getAttribute('href'));
+        max = Math.max(max, localMax);
+      }
+    });
+
+    if (!nextUrl) {
+      var next = document.querySelector('.b-navigation__next');
+      var nextAnchor = next && (next.closest('a') || (next.parentElement && next.parentElement.closest('a')));
+      if (nextAnchor) {
+        var candidateNext = absUrl(nextAnchor.getAttribute('href'));
+        if (inScope(candidateNext, base)) nextUrl = candidateNext;
+      }
+    }
+    if (!lastUrl) {
+      var last = document.querySelector('.b-navigation__last');
+      var lastAnchor = last && (last.closest('a') || (last.parentElement && last.parentElement.closest('a')));
+      if (lastAnchor) {
+        var candidateLast = absUrl(lastAnchor.getAttribute('href'));
+        if (inScope(candidateLast, base)) {
+          lastUrl = candidateLast;
+          max = Math.max(max, pageNumber(candidateLast));
+        }
       }
     }
 
-    var links = document.querySelectorAll('a[rel="next"], a[rel="last"], .pagination a, .pagenavi a, .navigation a, nav a');
-    var nextUrl = '', lastUrl = '';
-    for (var j = 0; j < links.length; j++) {
-      var rel = (links[j].getAttribute('rel') || '').toLowerCase();
-      var href2 = absUrl(links[j].getAttribute('href'));
-      if (!inScope(href2)) continue;
-      if (rel.indexOf('next') !== -1) nextUrl = href2 || nextUrl;
-      if (rel.indexOf('last') !== -1) lastUrl = href2 || lastUrl;
-      var t = cleanText(links[j].textContent);
-      if (/^(?:следующая|далее|next|›|»|>)$/i.test(t) && href2) nextUrl = href2;
-      if (/^(?:последняя|last|»›|»|>>)$/i.test(t) && href2) lastUrl = href2;
-    }
-    var current = Number((location.pathname.match(/\/page\/(\d+)\/?$/) || [])[1]) || 1;
-    if (kind === 'year') {
-      var ym = location.pathname.match(/\/year\/\d{4}\/page\/(\d+)\/?$/);
-      if (ym) current = Number(ym[1]);
-    }
-    if (current > max) max = current;
-    return { max: max, next: nextUrl, last: lastUrl, pages: pages, current: current, genre: currentGenre, filter: currentFilter };
+    pages = Array.from(new Set(pages)).sort(function (a, b) { return a - b; });
+    return {
+      max: max,
+      next: nextUrl,
+      last: lastUrl,
+      exact: !!lastUrl || (max === 1 && current === 1 && containers.length === 0 && !nextUrl),
+      pages: pages,
+      current: current,
+      genre: currentGenre,
+      filter: currentFilter
+    };
   }
 
   function parsePage() {
     var path = location.pathname;
-    var yearMatch = path.match(/^\/year\/(\d{4})(?:\/page\/\d+)?\/?$/);
+    var yearPath = path.replace(/\/page\/\d+\/?$/, '').replace(/\/+$/, '');
+    var yearMatch = yearPath.match(/(?:^|\/)(19\d{2}|20\d{2})$/);
     var kind = yearMatch ? 'year' : 'catalog';
     var year = yearMatch ? Number(yearMatch[1]) : null;
     var cards = extractCards();
