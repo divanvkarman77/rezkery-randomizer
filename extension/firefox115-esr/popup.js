@@ -122,39 +122,39 @@
     });
   }
 
-  API.runtime.onMessage.addListener(function (message) {
-    if (!message) return;
-    if (message.type === 'REZKERY_PARSE_RESULT' && pending[message.requestId]) {
-      pending[message.requestId].resolve(message.result);
+  API.runtime.onMessage.addListener(function (incomingMessage) {
+    if (!incomingMessage) return;
+    if (incomingMessage.type === 'REZKERY_PARSE_RESULT' && pending[incomingMessage.requestId]) {
+      pending[incomingMessage.requestId].resolve(incomingMessage.result);
     }
-    if (message.type === 'REZKERY_PARSE_ERROR' && pending[message.requestId]) {
-      pending[message.requestId].reject(new Error(message.error || 'Ошибка чтения страницы.'));
+    if (incomingMessage.type === 'REZKERY_PARSE_ERROR' && pending[incomingMessage.requestId]) {
+      pending[incomingMessage.requestId].reject(new Error(incomingMessage.error || 'Ошибка чтения страницы.'));
     }
-    if (message.type === 'REZKERY_HDREZKA_PROGRESS') {
-      var p = message.progress || {};
+    if (incomingMessage.type === 'REZKERY_HDREZKA_PROGRESS') {
+      var p = incomingMessage.progress || {};
       var syncText = (p.phase || 'Синхронизация…') + (p.total ? ' — ' + p.done + ' из ' + p.total : '…');
       $('#hdrezkaSyncStatus').textContent = syncText;
       if (hdrezkaSyncBusy) message(syncText, true);
     }
-    if (message.type === 'REZKERY_PAGE_COUNT_DETECTED') {
-      rememberPageCount(message.scope, message.year, message.filter, message.pages);
+    if (incomingMessage.type === 'REZKERY_PAGE_COUNT_DETECTED') {
+      rememberPageCount(incomingMessage.scope, incomingMessage.year, incomingMessage.filter, incomingMessage.pages);
     }
-    if (message.type === 'REZKERY_TASK_PROGRESS' && message.taskId === activeRandomTaskId) {
-      var progress = message.progress || {};
+    if (incomingMessage.type === 'REZKERY_TASK_PROGRESS' && incomingMessage.taskId === activeRandomTaskId) {
+      var progress = incomingMessage.progress || {};
       showRandomProgress(progress.phase, progress.detail, progress.done, progress.total);
     }
-    if (message.type === 'REZKERY_TASK_RESULT' && message.taskId === activeRandomTaskId) {
+    if (incomingMessage.type === 'REZKERY_TASK_RESULT' && incomingMessage.taskId === activeRandomTaskId) {
       activeRandomTaskId = null;
       hideRandomProgress();
-      if (message.ok) {
+      if (incomingMessage.ok) {
         setBusy(false);
-        var picks = message.picks || [];
+        var picks = incomingMessage.picks || [];
         if (picks.length === 1) messageToast('Открыто: ' + picks[0].title);
         else messageToast('Открыто ' + picks.length + ': ' + picks.map(function(m){return m.title;}).join(' · '));
         renderDb();
       } else {
         setBusy(false);
-        messageToast(message.error || 'Ошибка фоновой задачи.');
+        messageToast(incomingMessage.error || 'Ошибка фоновой задачи.');
       }
     }
   });
