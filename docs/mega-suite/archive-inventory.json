@@ -1,0 +1,304 @@
+{
+  "reportDate": "2026-10-21",
+  "repository": "divanvkarman77/rezkery-randomizer",
+  "comparisonCommit": "a0c6854b0ab7263dee44c2fed017191eca44b775",
+  "scope": "static source audit and integration plan; no application changes",
+  "archiveCount": 8,
+  "javascriptFiles": 40,
+  "expandedBytes": 1114037,
+  "archiveCodeExecuted": false,
+  "hdrezkaRequestsMade": false,
+  "archives": [
+    {
+      "archive": "Rezka_Catalog_Manager_5.2.17.zip",
+      "sha256": "f35638cb6b16ec167f862e49a5429ba2ce36006deaa9c567fd529851e51a9994",
+      "zipEntries": 44,
+      "extractedFiles": 44,
+      "expandedBytes": 341985,
+      "javascriptFiles": 4,
+      "manifest": {
+        "path": "manifest.json",
+        "name": "Rezka Catalog Manager 5.2.17",
+        "version": "5.2.17",
+        "manifestVersion": 3,
+        "background": {
+          "service_worker": "background.js"
+        },
+        "permissions": [
+          "activeTab",
+          "alarms",
+          "notifications",
+          "offscreen",
+          "scripting",
+          "storage",
+          "unlimitedStorage"
+        ],
+        "hostPermissions": [
+          "http://*/*",
+          "https://*/*"
+        ],
+        "firefox": null
+      },
+      "checks": {
+        "javascriptSyntax": "passed",
+        "manifestReferences": "passed",
+        "missingReferencedFiles": []
+      },
+      "runtimeTested": false
+    },
+    {
+      "archive": "Rezka_Catalog_Saver_Pro_Auto_4.5.4.zip",
+      "sha256": "2a044a66628e16b0152728eee86f7185247310680700eb8746a84342f97dde55",
+      "zipEntries": 5,
+      "extractedFiles": 5,
+      "expandedBytes": 125678,
+      "javascriptFiles": 2,
+      "manifest": {
+        "path": "manifest.json",
+        "name": "Rezka Catalog Saver — Pro Auto 4.5.4",
+        "version": "4.5.4",
+        "manifestVersion": 3,
+        "background": {
+          "service_worker": "background.js"
+        },
+        "permissions": [
+          "activeTab",
+          "scripting",
+          "storage",
+          "alarms",
+          "notifications"
+        ],
+        "hostPermissions": [
+          "http://*/*",
+          "https://*/*"
+        ],
+        "firefox": null
+      },
+      "checks": {
+        "javascriptSyntax": "passed",
+        "manifestReferences": "passed",
+        "missingReferencedFiles": []
+      },
+      "runtimeTested": false
+    },
+    {
+      "archive": "Rezka-Library-Backup-0.4.5.zip",
+      "sha256": "bd75b024f60651a1d73637d4597e0a1971451819491d041e664f87d7b773ebcd",
+      "zipEntries": 9,
+      "extractedFiles": 8,
+      "expandedBytes": 111450,
+      "javascriptFiles": 4,
+      "manifest": {
+        "path": "Rezka-Library-Backup-0.4.5/manifest.json",
+        "name": "Rezka Library Backup",
+        "version": "0.4.5",
+        "manifestVersion": 3,
+        "background": {
+          "service_worker": "background.js"
+        },
+        "permissions": [
+          "storage",
+          "tabs",
+          "activeTab",
+          "scripting"
+        ],
+        "hostPermissions": [
+          "<all_urls>"
+        ],
+        "firefox": null
+      },
+      "checks": {
+        "javascriptSyntax": "passed",
+        "manifestReferences": "passed",
+        "missingReferencedFiles": []
+      },
+      "runtimeTested": false
+    },
+    {
+      "archive": "Rezka-Library-Chrome-0.5.8-DomainFixed.zip",
+      "sha256": "c11f330878254a45c4251b5461efcdc9e1d6e684fdb10e20340f58d0f9a67e8b",
+      "zipEntries": 13,
+      "extractedFiles": 12,
+      "expandedBytes": 161587,
+      "javascriptFiles": 6,
+      "manifest": {
+        "path": "Rezka-Library-Chrome-0.5.8-DomainFixed/manifest.json",
+        "name": "Rezka Library — Chrome",
+        "version": "0.5.8",
+        "manifestVersion": 3,
+        "background": {
+          "service_worker": "background.js"
+        },
+        "permissions": [
+          "storage",
+          "tabs",
+          "activeTab",
+          "unlimitedStorage",
+          "scripting"
+        ],
+        "hostPermissions": [
+          "<all_urls>"
+        ],
+        "firefox": null
+      },
+      "checks": {
+        "javascriptSyntax": "passed",
+        "manifestReferences": "passed",
+        "missingReferencedFiles": []
+      },
+      "runtimeTested": false
+    },
+    {
+      "archive": "Rezka-Library-Firefox-0.5.5-FIXED.zip",
+      "sha256": "6d2428bf3a1911765e89fcb6c614fbbe31c3fc3136cb42646277d1b0a33d7c70",
+      "zipEntries": 12,
+      "extractedFiles": 12,
+      "expandedBytes": 149617,
+      "javascriptFiles": 6,
+      "manifest": {
+        "path": "manifest.json",
+        "name": "Rezka Library — Firefox",
+        "version": "0.5.5",
+        "manifestVersion": 2,
+        "background": {
+          "scripts": [
+            "background.js"
+          ],
+          "persistent": true
+        },
+        "permissions": [
+          "storage",
+          "tabs",
+          "activeTab",
+          "unlimitedStorage",
+          "<all_urls>",
+          "downloads"
+        ],
+        "hostPermissions": [],
+        "firefox": {
+          "gecko": {
+            "id": "rezka-library-firefox@example.local",
+            "strict_min_version": "121.0"
+          }
+        }
+      },
+      "checks": {
+        "javascriptSyntax": "passed",
+        "manifestReferences": "passed",
+        "missingReferencedFiles": []
+      },
+      "runtimeTested": false
+    },
+    {
+      "archive": "RezKery_Offline_Advanced_v1.0.37_PAGINATION_FIX.zip",
+      "sha256": "bdc4c8b94c755bd6dab2cadc6381c86f5d45bf17c7f5a0b83015cb96b9ba7df7",
+      "zipEntries": 12,
+      "extractedFiles": 11,
+      "expandedBytes": 117391,
+      "javascriptFiles": 6,
+      "manifest": {
+        "path": "rkfix37/manifest.json",
+        "name": "RezKery Offline Catalog — Advanced",
+        "version": "1.0.37",
+        "manifestVersion": 3,
+        "background": {
+          "service_worker": "background.js"
+        },
+        "permissions": [
+          "storage",
+          "downloads",
+          "unlimitedStorage",
+          "activeTab",
+          "offscreen",
+          "alarms",
+          "system.storage",
+          "tabs",
+          "scripting"
+        ],
+        "hostPermissions": [
+          "http://*/*",
+          "https://*/*"
+        ],
+        "firefox": null
+      },
+      "checks": {
+        "javascriptSyntax": "passed",
+        "manifestReferences": "passed",
+        "missingReferencedFiles": []
+      },
+      "runtimeTested": false
+    },
+    {
+      "archive": "RezKery_Offline_Advanced_v1.1.0.zip",
+      "sha256": "73f4bed51a9a69f133f1a73909634e7cd6a5e6d339ba987eb18e6f3b904f54c4",
+      "zipEntries": 12,
+      "extractedFiles": 11,
+      "expandedBytes": 52745,
+      "javascriptFiles": 6,
+      "manifest": {
+        "path": "advanced/manifest.json",
+        "name": "RezKery Offline Catalog — Advanced",
+        "version": "1.1.0",
+        "manifestVersion": 3,
+        "background": {
+          "service_worker": "background.js"
+        },
+        "permissions": [
+          "storage",
+          "downloads",
+          "unlimitedStorage",
+          "activeTab",
+          "offscreen",
+          "alarms"
+        ],
+        "hostPermissions": [
+          "http://*/*",
+          "https://*/*"
+        ],
+        "firefox": null
+      },
+      "checks": {
+        "javascriptSyntax": "passed",
+        "manifestReferences": "passed",
+        "missingReferencedFiles": []
+      },
+      "runtimeTested": false
+    },
+    {
+      "archive": "RezKery_Offline_Simple_v1.1.0.zip",
+      "sha256": "9e0ef7bdae4ddab48478b586c814d283568cd88e3e388f62033d151edfe26c95",
+      "zipEntries": 12,
+      "extractedFiles": 11,
+      "expandedBytes": 53584,
+      "javascriptFiles": 6,
+      "manifest": {
+        "path": "simple/manifest.json",
+        "name": "RezKery Offline Catalog — Simple",
+        "version": "1.1.0",
+        "manifestVersion": 3,
+        "background": {
+          "service_worker": "background.js"
+        },
+        "permissions": [
+          "storage",
+          "downloads",
+          "unlimitedStorage",
+          "activeTab",
+          "offscreen",
+          "alarms"
+        ],
+        "hostPermissions": [
+          "http://*/*",
+          "https://*/*"
+        ],
+        "firefox": null
+      },
+      "checks": {
+        "javascriptSyntax": "passed",
+        "manifestReferences": "passed",
+        "missingReferencedFiles": []
+      },
+      "runtimeTested": false
+    }
+  ]
+}
