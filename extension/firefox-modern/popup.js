@@ -183,13 +183,35 @@
   function clean(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
   function normalizeUrl(url) {
     try {
-      var u = new URL(url);
+      var u = new URL(url, BASE_ORIGIN);
       u.hash = '';
       return u.href.replace(/\/+$/, '/');
     } catch (e) { return String(url || '').trim(); }
   }
 
-  function inferTypeFromUrl(url) {
+  function movieKey(url) {
+    try {
+      var path = new URL(url, BASE_ORIGIN).pathname.replace(/\/{2,}/g, '/').replace(/\/+$/, '');
+      return path || '/';
+    } catch (e) {
+      return String(url || '').trim().replace(/[?#].*$/, '').replace(/\/+$/, '') || '/';
+    }
+  }
+
+  function mergeMovieRecords(existing, incoming) {
+    var a = normalizeMovie(existing), b = normalizeMovie(incoming);
+    if (!a.title || a.title === 'Без названия') a.title = b.title;
+    if (!a.year) a.year = b.year;
+    if (!a.poster) a.poster = b.poster;
+    if ((!a.type || a.type === 'other') && b.type && b.type !== 'other') a.type = b.type;
+    if (!a.sourcePage) a.sourcePage = b.sourcePage;
+    if (!a.addedAt) a.addedAt = b.addedAt;
+    a.typeLabel = TYPE_LABELS[a.type] || TYPE_LABELS.other;
+    a.id = movieKey(a.url);
+    return a;
+  }
+
+    function inferTypeFromUrl(url) {
     var u = String(url || '').toLowerCase();
     if (/\/films\//.test(u)) return 'film';
     if (/\/series\//.test(u) || /\/serial/.test(u)) return 'series';
@@ -210,7 +232,7 @@
     var type = m.type;
     if (!TYPE_LABELS[type]) type = inferTypeFromUrl(rawUrl);
     return {
-      id: normalizeUrl(rawUrl),
+      id: movieKey(rawUrl),
       url: normalizeUrl(rawUrl),
       title: m.title || m.name || 'Без названия',
       year: m.year || null,
@@ -225,12 +247,23 @@
   function loadDb() {
     return storageGet(DB_KEY).then(function (db) {
       if (!Array.isArray(db)) return [];
-      return db.filter(function (m) { return m && m.url; }).map(normalizeMovie);
+      var source = db.filter(function (m) { return m && m.url; }), map = Object.create(null), changed = false;
+      source.forEach(function (raw) {
+        var item = normalizeMovie(raw), key = movieKey(item.url);
+        if (!key || key === '/') return;
+        item.id = key;
+        if (map[key]) { map[key] = mergeMovieRecords(map[key], item); changed = true; }
+        else map[key] = item;
+        if (raw.id !== key) changed = true;
+      });
+      var result = Object.keys(map).map(function (key) { return map[key]; });
+      if (result.length !== source.length) changed = true;
+      return changed ? saveDb(result).then(function () { return result; }) : result;
     });
   }
   function saveDb(db) { return storageSet((function () { var x = {}; x[DB_KEY] = db; return x; })()); }
-  function loadUsed() { return storageGet(USED_KEY).then(function (x) { return Array.isArray(x) ? x.map(normalizeUrl).filter(Boolean) : []; }); }
-  function saveUsed(urls) { var x = {}; x[USED_KEY] = Array.from(new Set((urls || []).map(normalizeUrl).filter(Boolean))); return storageSet(x); }
+  function loadUsed() { return storageGet(USED_KEY).then(function (x) { return Array.isArray(x) ? x.map(movieKey).filter(Boolean) : []; }); }
+  function saveUsed(urls) { var x = {}; x[USED_KEY] = Array.from(new Set((urls || []).map(movieKey).filter(Boolean))); return storageSet(x); }
   function mergeUsed(urls) { return loadUsed().then(function (existing) { return saveUsed(existing.concat(urls || [])); }); }
 
   function formatDate(iso) {
@@ -243,11 +276,11 @@
   function addMovies(movies) {
     return loadDb().then(function (db) {
       var byUrl = Object.create(null);
-      db.forEach(function (m) { byUrl[normalizeUrl(m.url)] = m; });
+      db.forEach(function (m) { byUrl[movieKey(m.url)] = m; });
       var added = [];
       movies.forEach(function (m) {
-        var url = normalizeUrl(m.url);
-        if (!url || byUrl[url]) return;
+        var url = normalizeUrl(m.url), key = movieKey(url);
+        if (!url || !key || key === '/') return;
         var type = TYPE_LABELS[m.type] ? m.type : inferTypeFromUrl(url);
         var item = normalizeMovie({
           url: url,
@@ -256,9 +289,16 @@
           poster: m.poster,
           type: type,
           sourcePage: m.sourcePage,
-          addedAt: new Date().toISOString()
+          addedAt: m.addedAt || new Date().toISOString()
         });
-        db.push(item); byUrl[url] = item; added.push(item);
+        if (byUrl[key]) {
+          var index = db.indexOf(byUrl[key]);
+          byUrl[key] = mergeMovieRecords(byUrl[key], item);
+          if (index >= 0) db[index] = byUrl[key];
+          return;
+        }
+        item.id = key;
+        db.push(item); byUrl[key] = item; added.push(item);
       });
       return saveDb(db).then(function () { return { db: db, added: added }; });
     });
@@ -312,7 +352,7 @@
   function uniqUrls(movies) {
     var seen = Object.create(null), out = [];
     movies.forEach(function (m) {
-      var u = normalizeUrl(m.url);
+      var u = movieKey(m.url);
       if (u && !seen[u]) { seen[u] = 1; out.push(m); }
     });
     return out;
@@ -583,7 +623,7 @@
       var page = randomInt(pageCount) + 1;
       return parsePageViaTab(pageUrl(scope, year, page, filter), 25000).then(function (result) {
         var candidates = uniqUrls(result.cards || []).filter(function (m) {
-          return typeMatches(m, filter) && !dbUrls[normalizeUrl(m.url)];
+          return typeMatches(m, filter) && !dbUrls[movieKey(m.url)];
         });
         if (!candidates.length) return next();
         return candidates[randomInt(candidates.length)];
@@ -642,7 +682,7 @@
 
   function exportJson() {
     Promise.all([loadDb(), loadUsed()]).then(function (values) {
-      var db = values[0], used = Array.from(new Set(values[1].concat(db.map(function (m) { return m.url; }))));
+      var db = values[0], used = Array.from(new Set(values[1].concat(db.map(function (m) { return movieKey(m.url); }))));
       downloadFile('rezkery-randomizer-' + dateStamp() + '.json', JSON.stringify({
         format: 'rezkery-randomizer-db', version: 1, exportedAt: new Date().toISOString(), items: db, used: used
       }, null, 2), 'application/json;charset=utf-8');
@@ -656,7 +696,7 @@
 
   function exportHtml() {
     loadDb().then(function (db) {
-      var exportDb = db.map(function(m){ var x = {}; Object.keys(m).forEach(function(k){x[k]=m[k];}); x.url = replaceOrigin(m.url); x.id = x.url; return x; });
+      var exportDb = db.map(function(m){ var x = {}; Object.keys(m).forEach(function(k){x[k]=m[k];}); x.url = replaceOrigin(m.url); x.id = movieKey(x.url); return x; });
       var data = JSON.stringify(exportDb).replace(/<\//g, '<\\/');
       var cards = exportDb.map(function (m) {
         var poster = m.poster ? '<img loading="lazy" src="' + htmlEscape(m.poster) + '" alt="">' : '';
@@ -699,9 +739,18 @@
         }
         imported = imported.filter(function (m) { return m && (m.url || m.href || m.link || m.uri); }).map(normalizeMovie);
         loadDb().then(function (db) {
-          var map = Object.create(null); db.forEach(function (m) { map[normalizeUrl(m.url)] = m; });
+          var map = Object.create(null); db.forEach(function (m) { map[movieKey(m.url)] = m; });
           var n = 0;
-          imported.forEach(function (m) { var u = normalizeUrl(m.url); if (!map[u]) { m.id = u; map[u] = m; db.push(m); n++; } });
+          imported.forEach(function (m) {
+            var key = movieKey(m.url);
+            if (!key || key === '/') return;
+            if (!map[key]) { m.id = key; map[key] = m; db.push(m); n++; }
+            else {
+              var merged = mergeMovieRecords(map[key], m), oldIndex = db.indexOf(map[key]);
+              if (oldIndex >= 0) db[oldIndex] = merged;
+              map[key] = merged;
+            }
+          });
           return Promise.all([saveDb(db), mergeUsed(importedUsed.concat(imported.map(function (m) { return m.url; })))])
             .then(function () { message('Импортировано новых: ' + n + ' · всего в базе: ' + db.length); renderDb(); });
         });
@@ -743,9 +792,9 @@
         var map = Object.create(null);
         (remote || []).concat(local).forEach(function(m) {
           if (!m || !m.url) return;
-          var normalized = normalizeMovie(m), key = normalizeUrl(normalized.url);
-          if (!key) return;
-          if (!map[key] || String(normalized.addedAt) > String(map[key].addedAt)) map[key] = normalized;
+          var normalized = normalizeMovie(m), key = movieKey(normalized.url);
+          if (!key || key === '/') return;
+          map[key] = map[key] ? mergeMovieRecords(map[key], normalized) : normalized;
         });
         return Object.keys(map).map(function(k) { return map[k]; });
       }
@@ -1116,7 +1165,7 @@ function setupSettingsUi() {
   $('#searchInput').addEventListener('input', renderDb);
   $('#dbTable').addEventListener('click', function (e) {
     var b = e.target.closest('.delete-one'); if (!b) return;
-    loadDb().then(function (db) { var db2 = db.filter(function (m) { return normalizeUrl(m.url) !== normalizeUrl(b.dataset.url); }); return saveDb(db2).then(renderDb); });
+    loadDb().then(function (db) { var target = movieKey(b.dataset.url), db2 = db.filter(function (m) { return movieKey(m.url) !== target; }); return Promise.all([saveDb(db2), loadUsed().then(function (used) { return saveUsed(used.filter(function (key) { return key !== target; })); })]).then(renderDb); });
   });
   $('#diagnostics').addEventListener('click', diagnostics);
 
