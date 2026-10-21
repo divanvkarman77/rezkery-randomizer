@@ -88,6 +88,30 @@
       });
     });
   }
+  function getTab(id) {
+    if (isFirefox) return API.tabs.get(id);
+    return new Promise(function (resolve, reject) {
+      API.tabs.get(id, function (tab) {
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else resolve(tab);
+      });
+    });
+  }
+  function waitForTabReady(id, timeoutMs) {
+    var started = Date.now();
+    timeoutMs = timeoutMs || 30000;
+    return new Promise(function (resolve, reject) {
+      function check() {
+        getTab(id).then(function (tab) {
+          if (tab && tab.status === 'complete') { resolve(tab); return; }
+          if (Date.now() - started >= timeoutMs) { reject(new Error('Фоновая вкладка HDRezka не загрузилась вовремя.')); return; }
+          setTimeout(check, 250);
+        }).catch(reject);
+      }
+      check();
+    });
+  }
+
   function sendToTab(tabId, msg) {
     if (isFirefox) return API.tabs.sendMessage(tabId, msg);
     return new Promise(function (resolve, reject) {
@@ -763,17 +787,47 @@
     buttons.forEach(function (button) { button.disabled = true; });
     status.textContent = 'Проверяю авторизацию HDRezka…';
     message('Проверяю авторизацию HDRezka…', true);
-    queryTabs({active:true,currentWindow:true}).then(function(tabs) {
-      var tab=tabs && tabs[0];
-      if(!tab || !tab.id || !tab.url) throw new Error('Откройте HDRezka в активной вкладке и войдите в свой аккаунт.');
-      var host;
-      try { host = new URL(tab.url).hostname; } catch(e) { throw new Error('Не удалось определить адрес активной вкладки.'); }
-      if (!/(rezka|hdrzk)/i.test(host)) throw new Error('Откройте HDRezka (войдите в аккаунт) в активной вкладке и повторите синхронизацию.');
-      return loadDb().then(function(db) {
-        return API.scripting.executeScript({
-          target:{tabId:tab.id},
-          args:[db.map(function(m){return {url:m.url,title:m.title||m.name||'',year:m.year||'',type:m.type||''};})],
-          func: async function(movies) {
+    var syncOrigins = [];
+    [BASE_ORIGIN, 'https://rezkery.com', 'https://rezka.fi'].forEach(function (value) {
+      try {
+        var origin = normalizeOrigin(value);
+        if (syncOrigins.indexOf(origin) === -1) syncOrigins.push(origin);
+      } catch (e) {}
+    });
+    queryTabs({}).then(function (tabs) {
+      var tabsByOrigin = Object.create(null);
+      (tabs || []).forEach(function (tab) {
+        try {
+          var url = new URL(tab.url);
+          if (syncOrigins.indexOf(url.origin) === -1) return;
+          var score = (/^\/favorites(?:\/|$)/i.test(url.pathname) ? 2 : 0) + (tab.active ? 1 : 0);
+          if (!tabsByOrigin[url.origin] || score > tabsByOrigin[url.origin].score) tabsByOrigin[url.origin] = { tab: tab, score: score };
+        } catch (e) {}
+      });
+      return loadDb().then(function (db) {
+        var errors = [];
+        var noFolderResult = null;
+        function attemptSync(index) {
+          if (index >= syncOrigins.length) {
+            if (noFolderResult) return Promise.resolve(noFolderResult);
+            var details = errors.length ? ' ' + errors.join(' | ') : '';
+            return Promise.reject(new Error('Не удалось прочитать закладки ни на одном домене.' + details));
+          }
+          var origin = syncOrigins[index];
+          var host = new URL(origin).hostname;
+          var existing = tabsByOrigin[origin] && tabsByOrigin[origin].tab;
+          var temporaryTabId = null;
+          var ready = existing ? Promise.resolve(existing) : createTab(origin + '/favorites/', false).then(function (created) {
+            temporaryTabId = created.id;
+            return waitForTabReady(created.id, 30000);
+          });
+          status.textContent = 'Проверяю закладки на ' + host + '…';
+          return ready.then(function (tabToUse) {
+            if (!tabToUse || !tabToUse.id) throw new Error('Не удалось открыть фоновую страницу закладок.');
+            return API.scripting.executeScript({
+              target:{tabId:tabToUse.id},
+              args:[db.map(function(m){return {url:m.url,title:m.title||m.name||'',year:m.year||'',type:m.type||''};})],
+              func: async function(movies) {
             var api = typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null);
             var delay=1400,lastRequest=0,visited=Object.create(null);
             function wait(ms){return new Promise(function(resolve){setTimeout(resolve,ms);});}
@@ -883,28 +937,45 @@
               return {ok:true,noFolder:false,items:imported,added:added,skipped:skipped,failed:failed,pages:pages};
             }catch(e){return {ok:false,error:String(e.message||e)}}
           }
-        }).then(function(results) {
-          var result=results && results[0] && results[0].result;
-          if(!result || !result.ok) throw new Error(result && result.error || 'HDRezka не вернула результат синхронизации.');
-          var imported=result.items||[];
-          return Promise.all([addMovies(imported),mergeUsed(imported.map(function(m){return m.url;}))]).then(function(values){
-            var count=(values[0]&&values[0].added||[]).length;
-            var msg=result.noFolder?'Папка RANDOM не найдена; локальная база пуста.':'Импортировано в базу '+count+' новых карточек; в папку RANDOM добавлено '+result.added+', уже было '+result.skipped+'; прочитано страниц: '+result.pages+'.';
-            if(result.failed&&result.failed.length)msg+=' Ошибки: '+result.failed.slice(0,3).join(' | ');
-            status.textContent=msg;renderDb();message(msg);
+            }).then(function (results) {
+              var result = results && results[0] && results[0].result;
+              if (!result || !result.ok) {
+                var failure = new Error(result && result.error || 'HDRezka не вернула результат синхронизации.');
+                if (/anubis|cloudflare|проверку защиты|ограничила запросы|http 429/i.test(failure.message)) failure.stopSync = true;
+                throw failure;
+              }
+              if (result.noFolder) { noFolderResult = result; return null; }
+              return result;
+            });
+          }).catch(function (error) {
+            if (error && error.stopSync) throw error;
+            errors.push(host + ': ' + (error && error.message || 'ошибка чтения закладок'));
+            return null;
+          }).finally(function () {
+            return temporaryTabId ? removeTab(temporaryTabId) : Promise.resolve();
+          }).then(function (result) {
+            return result || attemptSync(index + 1);
           });
+        }
+        return attemptSync(0).then(function (result) {
+          var imported=result.items||[];
+                    return Promise.all([addMovies(imported),mergeUsed(imported.map(function(m){return m.url;}))]).then(function(values){
+                      var count=(values[0]&&values[0].added||[]).length;
+                      var msg=result.noFolder?'Папка RANDOM не найдена; локальная база пуста.':'Импортировано в базу '+count+' новых карточек; в папку RANDOM добавлено '+result.added+', уже было '+result.skipped+'; прочитано страниц: '+result.pages+'.';
+                      if(result.failed&&result.failed.length)msg+=' Ошибки: '+result.failed.slice(0,3).join(' | ');
+                      status.textContent=msg;renderDb();message(msg);
+                    });
         });
       });
-    }).catch(function(e) {
-      status.textContent='Синхронизация не выполнена: '+(e.message||'ошибка');
+    }).catch(function (e) {
+      status.textContent = 'Синхронизация не выполнена: ' + (e.message || 'ошибка');
       message(status.textContent);
-    }).finally(function(){
-      hdrezkaSyncBusy=false;
-      buttons.forEach(function (button) { button.disabled=false; });
+    }).finally(function () {
+      hdrezkaSyncBusy = false;
+      buttons.forEach(function (button) { button.disabled = false; });
     });
   }
-
-  function setupSettingsUi() {
+function setupSettingsUi() {
     $('#domainInput').value = BASE_ORIGIN;
     $('#pageCountOverride').value = String(pageCountOverride);
     $('#settingsStatus').textContent = 'Текущий домен: ' + BASE_ORIGIN;
