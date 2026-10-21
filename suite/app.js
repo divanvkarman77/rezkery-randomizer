@@ -1,62 +1,1068 @@
-(async function(){'use strict';const C=RezkaSuite,$=id=>document.getElementById(id),native=!!globalThis.RezkaNative,api=globalThis.browser||globalThis.chrome;
-const repo=native?new RezkaSuiteRepository.NativeRepository():new RezkaSuiteRepository.Repository();await repo.open();let ui=(await repo.get('settings','ui'))||{id:'ui',tab:'library',offset:0,filters:{}},settings=(await repo.get('settings','preferences'))||{id:'preferences',origin:'https://rezkery.com'},selected=null,importer=null,abort=null,loading=false;
-const tell=s=>{$('message').textContent=s;};const guard=fn=>async(...args)=>{try{await fn(...args);}catch(e){tell(e.message||String(e));}};
-function extCall(area,method,...args){const owner=area==='storage'?api.storage.local:api[area];return new Promise((resolve,reject)=>{if(globalThis.browser){owner[method](...args).then(resolve,reject);}else owner[method](...args,result=>{const e=api.runtime.lastError;e?reject(Error(e.message)):resolve(result);});});}
-const pending=new Map();globalThis.suiteNativeReply=(id,result)=>{const p=pending.get(id);if(p){pending.delete(id);p.resolve(result);}};
-function nativeRequest(command){return new Promise((resolve,reject)=>{const id='n'+Date.now()+Math.random();pending.set(id,{resolve,reject});RezkaNative.request(id,JSON.stringify(command));});}
-const runner=new RezkaSuiteJobs.Runner(repo,(job,command)=>nativeRequest({...command,origin:new URL(job.params.url).origin}));
-async function send(command){if(native){if(command.action==='enqueue')return runner.enqueue(command.kind,command.params);if(command.action==='resume')return runner.resume(command.id);return;}const r=await extCall('runtime','sendMessage',{type:'SUITE_COMMAND',...command});if(r?.error)throw Error(r.error);return r?.value;}
-async function saveUI(){await repo.put('settings',ui);}
-function tab(name){document.querySelectorAll('main>section').forEach(e=>{e.hidden=e.id!==name;});document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));ui.tab=name;saveUI().catch(tell);if(name==='library')refresh().catch(tell);if(name==='jobs')jobs().catch(tell);}
-document.querySelectorAll('[data-tab]').forEach(e=>e.onclick=()=>tab(e.dataset.tab));$('gear').onclick=()=>tab('settings');
-function theme(){document.body.classList.toggle('light',!!ui.light);$('theme').textContent=ui.light?'☾':'☀';}theme();$('theme').onclick=()=>{ui.light=!ui.light;theme();saveUI();};
-const filters={q:'q',year:'filterYear',type:'filterType',parent:'parent',status:'statusFilter',sort:'sort'};
-for(const [key,id] of Object.entries(filters)){$(id).value=ui.filters?.[key]||(key==='sort'?'addedAt':'');let timer;$(id).oninput=()=>{clearTimeout(timer);timer=setTimeout(guard(async()=>{ui.filters=Object.fromEntries(Object.entries(filters).map(([k,e])=>[k,$(e).value]));ui.offset=0;await saveUI();await refresh();}),200);};}
-async function counts(){const [movies,history,assets]=await Promise.all(['movies','history','assets'].map(s=>repo.count(s)));$('stats').textContent=`${movies} в библиотеке · ${history} выбрано`;$('storageStats').textContent=`Постеров в кэше: ${assets}`;}
-async function parents(){const rows=[...await repo.all('catalogs'),...await repo.all('collections'),...await repo.all('tags')];for(const id of ['parent','uploadParent','detailParent']){const value=$(id).value;$(id).replaceChildren(new Option(id==='parent'?'Все каталоги':'Выберите…',''));for(const p of rows)$(id).add(new Option(p.title||p.name||p.id,p.id));$(id).value=value||ui.filters?.parent||'';}return rows;}
-function openMovie(m){let u=new URL(m.url);if(settings.origin)u=new URL(u.pathname+u.search,new URL(settings.origin).origin);if(native)RezkaNative.open(u.href);else extCall('tabs','create',{url:u.href,active:true}).catch(e=>tell(e.message));}
-async function renderCards(container,movies){container.replaceChildren();const assets=await repo.getMany('assets',movies.map(m=>m.posterAsset||'missing'));movies.forEach((m,i)=>{const node=document.createElement('article');node.className='movie';if(assets[i]?.data){const img=document.createElement('img');img.src=assets[i].data;img.loading='lazy';img.alt='';node.append(img);}const b=document.createElement('button');b.textContent=m.title;b.onclick=guard(()=>detail(m.id));const meta=document.createElement('small');meta.textContent=[m.year,m.type==='series'?'Сериал':m.type==='anime'?'Аниме':m.type==='cartoon'?'Мультфильм':'Фильм',m.status,m.rating?'★ '+m.rating:''].filter(Boolean).join(' · ');node.append(b,meta);container.append(node);});}
-async function refresh(){if(loading)return;loading=true;try{const r=await repo.query({...ui.filters,offset:ui.offset||0,limit:60});await renderCards($('cards'),r.items);$('prev').disabled=!ui.offset;$('next').disabled=!r.hasMore;$('pageNumber').textContent=String(Math.floor((ui.offset||0)/60)+1);await counts();}finally{loading=false;}}
-$('prev').onclick=guard(async()=>{ui.offset=Math.max(0,ui.offset-60);await saveUI();await refresh();});$('next').onclick=guard(async()=>{ui.offset=(ui.offset||0)+60;await saveUI();await refresh();});
-async function detail(id){selected=await repo.get('movies',id);if(!selected)return;const [d,s,a]=await Promise.all([repo.get('details',id),repo.get('userState',id),repo.get('assets',selected.posterAsset||'missing')]);$('detailTitle').textContent=selected.title;$('detailMeta').textContent=[selected.year,...(selected.countries||[]),...(selected.genres||[])].filter(Boolean).join(' · ');$('description').textContent=[d?.description,d?.director?'Режиссёр: '+d.director:'',d?.cast?'В ролях: '+d.cast:''].filter(Boolean).join('\n\n');$('detailPoster').replaceChildren();if(a?.data){const img=document.createElement('img');img.src=a.data;$('detailPoster').append(img);}$('detailStatus').value=s?.status||'';$('detailRating').value=s?.rating||'';$('detailNote').value=s?.note||'';$('detailFavorite').checked=!!s?.favorite;$('conflicts').textContent=s?.conflicts?.length?'Сохранены варианты заметок при объединении: '+s.conflicts.map(x=>x.note||'').join(' / '):'';if(!$('detail').open)$('detail').showModal();}
-$('closeDetail').onclick=()=>{$('detail').close();};$('openMovie').onclick=()=>{if(selected)openMovie(selected);};
-$('saveDetail').onclick=guard(async()=>{const state={id:selected.id,movieId:selected.id,status:$('detailStatus').value,rating:Math.max(0,Math.min(10,Number($('detailRating').value)||0)),note:$('detailNote').value,favorite:$('detailFavorite').checked,updatedAt:Date.now()};await repo.batch([['userState',state],['movies',{...selected,status:state.status,rating:state.rating,updatedAt:Date.now()}]]);$('detail').close();await refresh();});
-$('addRelation').onclick=guard(async()=>{const parentId=$('detailParent').value;if(!parentId)throw Error('Выберите коллекцию или метку');await repo.put('memberships',{id:parentId+'|'+selected.id,parentId,movieId:selected.id});tell('Связь добавлена');});
-$('removeRelation').onclick=guard(async()=>{const parentId=$('detailParent').value;if(!parentId)throw Error('Выберите папку');await repo.delete('memberships',parentId+'|'+selected.id);$('detail').close();await refresh();});
-$('deleteMovie').onclick=guard(async()=>{if(!confirm('Удалить «'+selected.title+'» из библиотеки? История рандома сохранится.'))return;const id=selected.id,batch=['movies','details','userState'].map(s=>[s,{id},true]);for await(const row of repo.iterate('memberships'))if(row.movieId===id)batch.push(['memberships',{id:row.id},true]);batch.push(['tombstones',{id:'movies:'+id,store:'movies',targetId:id,at:Date.now()}]);await repo.batch(batch);$('detail').close();await refresh();});
-for(const [id,store,prefix] of [['newCollection','collections','collection:'],['newTag','tags','tag:']])$(id).onclick=guard(async()=>{const name=prompt('Название');if(!name?.trim())return;await repo.put(store,{id:prefix+Date.now()+'-'+Math.random().toString(36).slice(2),name:name.trim(),updatedAt:Date.now()});await parents();tell('Создано: '+name);});
-let randomConfig=(await repo.get('settings','random'))||{id:'random',mode:'simple',simple:{count:1},advanced:{count:1,year:'',type:''}};
-function setRandom(){const v=randomConfig[randomConfig.mode];$('randomMode').value=randomConfig.mode;$('advanced').hidden=randomConfig.mode!=='advanced';$('pickCount').value=v.count;$('randomYear').value=randomConfig.advanced.year;$('randomType').value=randomConfig.advanced.type;$('yearSelect').value=randomConfig.advanced.year||'';}
-for(let y=Math.max(2035,new Date().getFullYear()+10);y>=1900;y--){$('years').append(new Option(String(y),String(y)));$('yearSelect').add(new Option(String(y),String(y)));}$('yearSelect').insertBefore(new Option('Любой год',''),$('yearSelect').firstChild);setRandom();
-async function saveRandom(){const v=randomConfig[randomConfig.mode];v.count=Math.max(1,Math.min(30,+$('pickCount').value||1));if(randomConfig.mode==='advanced'){v.year=$('randomYear').value;v.type=$('randomType').value;}await repo.put('settings',randomConfig);}
-$('randomMode').onchange=guard(async()=>{await saveRandom();randomConfig.mode=$('randomMode').value;setRandom();await repo.put('settings',randomConfig);});for(const id of ['pickCount','randomType','randomYear'])$(id).onchange=guard(saveRandom);$('yearSelect').onchange=guard(async()=>{$('randomYear').value=$('yearSelect').value;await saveRandom();});for(const [id,delta] of [['yearMinus',-1],['yearPlus',1]])$(id).onclick=guard(async()=>{$('randomYear').value=Math.max(1800,Math.min(2199,(+$('randomYear').value||new Date().getFullYear())+delta));await saveRandom();});
-// Legacy and Suite share only selected records; catalogue imports never become used URLs.
-async function publishSelected(movies){if(native){RezkaNative.selected(JSON.stringify(movies));return;}const data=await extCall('storage','get',['rz_movies_v1','rz_used_v1']);const merged=new Map((data.rz_movies_v1||[]).map(m=>[C.identity(m),m]));for(const m of movies)merged.set(m.id,m);const used=new Set(data.rz_used_v1||[]);for(const m of movies)used.add(C.path(m.url));await extCall('storage','set',{rz_movies_v1:[...merged.values()],rz_used_v1:[...used]});}
-$('pick').onclick=guard(async()=>{await saveRandom();const config=randomConfig[randomConfig.mode],history=new Set((await repo.all('history')).map(x=>x.movieId||x.id)),size=config.count,chosen=[],byYear=new Map();let seen=0;for await(const m of repo.iterate('movies')){if(history.has(m.id)||randomConfig.mode==='advanced'&&(config.year&&m.year!==+config.year||config.type&&m.type!==config.type))continue;if(randomConfig.mode==='simple'&&settings.differentYears){const key=m.year||'unknown',group=byYear.get(key)||{n:0};group.n++;if(Math.random()<1/group.n)group.movie=m;byYear.set(key,group);}else{seen++;if(chosen.length<size)chosen.push(m);else{const n=Math.floor(Math.random()*seen);if(n<size)chosen[n]=m;}}}if(byYear.size){const groups=[...byYear.values()];while(chosen.length<size&&groups.length){const n=Math.floor(Math.random()*groups.length);chosen.push(groups.splice(n,1)[0].movie);}}if(!chosen.length)throw Error('Нет подходящих невыбранных карточек. Добавьте каталог или очистите историю в настройках');await repo.batch(chosen.map(m=>['history',{id:m.id,movieId:m.id,at:Date.now(),source:'suite-random'}]));await publishSelected(chosen);await renderCards($('picked'),chosen);await counts();tell('Выбрано '+chosen.length+'. Нажмите карточку для открытия.');});
-async function enqueue(kind,params){const j=await send({action:'enqueue',kind,params});tell('Задание добавлено');tab('jobs');await jobs();return j;}
-$('scan').onclick=guard(()=>enqueue('scan',{url:$('scanUrl').value,max:+$('scanMax').value}));
-const bookmarks=direction=>enqueue('bookmarks',{url:settings.origin,direction,parent:direction==='selected'?$('uploadParent').value:''});$('importBookmarks').onclick=guard(()=>bookmarks('import'));$('mergeRandom').onclick=$('quickSync').onclick=guard(()=>bookmarks('random'));$('uploadFolder').onclick=guard(async()=>{if(!$('uploadParent').value)throw Error('Выберите локальный каталог');await bookmarks('selected');});
-$('login').onclick=()=>{const u=new URL('/favorites/',settings.origin).href;if(native)RezkaNative.login(u);else extCall('tabs','create',{url:u,active:true}).catch(e=>tell(e.message));};
-const jobLabels={queued:'В очереди',running:'Выполняется',completed:'Завершено',failed:'Ошибка',waiting_challenge:'Проверка защиты',paused_auth:'Требуется вход',paused_user:'Приостановлено',waiting_retry:'Ожидание повтора',cancelled:'Отменено',preview:'Ожидает импорта'};
-async function jobs(){const all=(await repo.all('jobs')).sort((a,b)=>b.at-a.at);$('jobList').replaceChildren();for(const j of all){const box=document.createElement('div');box.className='job';const p=document.createElement('p');p.textContent=[j.kind,jobLabels[j.status]||j.status,`Страниц/записей: ${j.done||0}${j.max?' / '+j.max:''}`,`Обработано карточек: ${j.imported||j.stats?.movies||0}`,j.uploaded?'Выгружено: '+j.uploaded:'',j.error].filter(Boolean).join(' · ');box.append(p);if(j.kind!=='import'&&!['completed','cancelled'].includes(j.status)){const pause=document.createElement('button');pause.textContent=j.status==='running'||j.status==='queued'?'Пауза':'Продолжить';pause.onclick=guard(async()=>{if(['running','queued'].includes(j.status))await repo.put('jobs',{...j,status:'paused_user'});else await send({action:'resume',id:j.id});await jobs();});const cancel=document.createElement('button');cancel.textContent='Отменить';cancel.onclick=guard(async()=>{await repo.put('jobs',{...j,status:'cancelled'});await jobs();});box.append(pause,cancel);}if(j.status==='preview'){const b=document.createElement('button');b.textContent='Вернуться к импорту';b.onclick=guard(async()=>{importer=new RezkaSuiteImporter.Importer(repo);importer.session=j.id;importer.stats=j.stats;await previewImport();tab('files');});box.append(b);}$('jobList').append(box);}}
-function importProgress(s){$('importProgress').textContent=`Карточек: ${s.movies||0} · постеров: ${s.assets||0}${s.applied?' · записано: '+s.applied:''}`;}
-async function previewImport(){let added=0,duplicates=0,key=null;while(true){const rows=await repo.prefix('staging',importer.session+':movies:',key,100);if(!rows.length)break;const existing=await repo.getMany('movies',rows.map(x=>x.row.id));for(const m of existing)m?duplicates++:added++;key=rows.at(-1).id;}$('previewText').textContent=`Новых карточек: ${added}; уже есть: ${duplicates}; постеров: ${importer.stats.assets}. Личные заметки сохраняются. До подтверждения библиотека не меняется.`;$('preview').hidden=false;}
-$('importFile').onchange=guard(async()=>{const file=$('importFile').files[0];if(!file)return;if(importer)await importer.discard();abort=new AbortController();importer=new RezkaSuiteImporter.Importer(repo,{progress:importProgress,signal:abort.signal});$('cancelImport').hidden=false;$('preview').hidden=true;try{await importer.file(file);await previewImport();}catch(e){await importer.discard();importer=null;throw e;}finally{$('cancelImport').hidden=true;$('importFile').value='';}});$('cancelImport').onclick=()=>abort?.abort();
-$('discardImport').onclick=guard(async()=>{await importer.discard();importer=null;$('preview').hidden=true;tell('Импорт отменён');});
-$('applyImport').onclick=guard(async()=>{if(!importer)return;$('applyImport').disabled=true;try{await importer.apply();if($('markImported').checked){const rows=[];for(const id of importer.movies)rows.push(['history',{id,movieId:id,at:Date.now(),source:'explicit-import'}]);await repo.batch(rows);}importer=null;$('preview').hidden=true;await parents();await refresh();tell('Импорт завершён');}finally{$('applyImport').disabled=false;}});
-async function download(name,type,chunks){if(native){RezkaNative.beginExport(name,type);try{for await(const chunk of chunks){const b=typeof chunk==='string'?new TextEncoder().encode(chunk):chunk;for(let p=0;p<b.length;p+=131072){let s='';for(const n of b.subarray(p,p+131072))s+=String.fromCharCode(n);RezkaNative.exportChunk(btoa(s));}}RezkaNative.finishExport();}catch(e){RezkaNative.cancelExport();throw e;}return;}const parts=[];for await(const c of chunks)parts.push(c);const blob=new Blob(parts,{type}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),60000);tell('Копия подготовлена: '+name);}
-$('exportJson').onclick=guard(()=>download('rezka-suite.json','application/json',RezkaSuiteExport.json(repo)));$('exportZip').onclick=guard(()=>download('rezka-suite.zip','application/zip',RezkaSuiteExport.zip(repo)));$('exportHtml').onclick=guard(()=>download('rezka-suite-offline.html','text/html',RezkaSuiteExport.offline(repo)));
-$('exportLegacy').onclick=guard(async()=>{async function* old(){yield '{"format":"rezkery-randomizer-db","version":1,"items":[';let first=true;for await(const h of repo.iterate('history')){const m=await repo.get('movies',h.movieId||h.id);if(m){yield(first?'':',')+JSON.stringify(m);first=false;}}yield '],"used":[';first=true;for await(const h of repo.iterate('history')){const m=await repo.get('movies',h.movieId||h.id);if(m){yield(first?'':',')+JSON.stringify(C.path(m.url));first=false;}}yield ']}';}await download('rezkery-randomizer-db.json','application/json',old());});
-$('origin').value=settings.origin;$('differentYears').checked=!!settings.differentYears;$('autoSync').checked=!!settings.autoSync;$('interval').value=(await repo.get('settings','network'))?.interval||2000;$('scanUrl').value=settings.origin;
-$('saveSettings').onclick=guard(async()=>{const origin=new URL($('origin').value);if(origin.protocol!=='https:')throw Error('Укажите HTTPS-зеркало');settings={id:'preferences',origin:origin.origin,differentYears:$('differentYears').checked,autoSync:$('autoSync').checked};await repo.batch([['settings',settings],['settings',{id:'network',interval:+$('interval').value}]]);tell('Настройки сохранены');});
-$('enrich').onclick=guard(()=>enqueue('details',{url:settings.origin}));$('cachePosters').onclick=guard(()=>enqueue('posters',{url:settings.origin}));
-async function clearStore(store){let key=null;while(true){const rows=await repo.page(store,key,100);if(!rows.length)break;await repo.batch(rows.map(x=>[store,{id:x.id},true]));key=rows.at(-1).id;}}
-$('clearMedia').onclick=guard(async()=>{if(!confirm('Удалить сохранённые постеры? Карточки и описания сохранятся.'))return;await clearStore('assets');await refresh();});$('clearHistory').onclick=guard(async()=>{if(!confirm('Снова разрешить выбирать все фильмы в Suite?'))return;await clearStore('history');await counts();});
-const cloud=await repo.get('settings','gist')||{};$('gistToken').value=cloud.token||'';$('gistId').value=cloud.gistId||'';
-$('gistSync').onclick=guard(async()=>{const token=$('gistToken').value.trim();let id=$('gistId').value.trim().replace(/^.*\//,'');if(!token)throw Error('Укажите токен Gist');const headers={Authorization:'Bearer '+token,Accept:'application/vnd.github+json','Content-Type':'application/json'},url='https://api.github.com/gists';let etag='';if(id){if(!/^[a-f0-9]+$/i.test(id))throw Error('Некорректный Gist ID');const r=await fetch(url+'/'+id,{headers});if(!r.ok)throw Error('Gist: HTTP '+r.status);etag=r.headers.get('ETag')||'';const g=await r.json(),f=g.files?.['rezka-suite.json'];if(f){if(f.truncated)throw Error('Gist превышает предел встроенного файла. Перенесите полную копию JSON/ZIP');const i=new RezkaSuiteImporter.Importer(repo);try{await i.json([f.content]);await i.apply();}catch(e){await i.discard();throw e;}}}
- let content='';for await(const c of RezkaSuiteExport.json(repo)){content+=c;if(content.length>950000)throw Error('Метаданные больше 950 КБ. Используйте файл JSON/ZIP вместо Gist');}if(id&&etag){const check=await fetch(url+'/'+id,{headers});if(!check.ok||check.headers.get('ETag')!==etag)throw Error('Gist изменился на другом устройстве. Повторите объединение');}const r=await fetch(id?url+'/'+id:url,{method:id?'PATCH':'POST',headers,body:JSON.stringify({description:'Rezka Suite — метаданные библиотеки',public:false,files:{'rezka-suite.json':{content}}})});if(!r.ok)throw Error('Gist: HTTP '+r.status);id=(await r.json()).id;$('gistId').value=id;await repo.put('settings',{id:'gist',token,gistId:id});await parents();await refresh();tell('Метаданные объединены через Gist');});
-async function migrate(){let movies=[];if(native){movies=JSON.parse(RezkaNative.legacy());}else{const old=await extCall('storage','get',['rz_movies_v1']);movies=old.rz_movies_v1||[];}const unseen=[];for(let n=0;n<movies.length;n+=200){const part=movies.slice(n,n+200),existing=await repo.getMany('history',part.map(m=>C.identity(m)||'invalid'));part.forEach((m,i)=>{if(!existing[i])unseen.push(m);});}if(unseen.length){movies=unseen;const i=new RezkaSuiteImporter.Importer(repo);await i.json([JSON.stringify({format:'rezkery-randomizer-db',version:1,items:movies})]);await i.apply();}await repo.put('settings',{id:'legacyMigrated',at:Date.now()});}
-await migrate();await parents();await counts();tab(ui.tab||'library');
-let polling=false;setInterval(async()=>{if(polling)return;polling=true;try{if(native)await runner.tick();if(ui.tab==='jobs')await jobs();if(native&&settings.autoSync){const last=await repo.get('settings','autoSyncAt');if(Date.now()-(last?.at||0)>1800000){await repo.put('settings',{id:'autoSyncAt',at:Date.now()});await send({action:'enqueue',kind:'bookmarks',params:{url:settings.origin,direction:'random-import',auto:true}});}}}catch(e){tell(e.message);}finally{polling=false;}},2000);
-if(native)$('jobNote').textContent+=' На Android задания выполняются, пока открыт экран Suite; после возврата продолжаются с сохранённого места.';
-})().catch(e=>{document.getElementById('message').textContent='Не удалось открыть библиотеку: '+(e.message||e);});
+(async function () {
+  "use strict";
+  const C = RezkaSuite,
+    $ = (id) => document.getElementById(id),
+    native = !!globalThis.RezkaNative,
+    api = globalThis.browser || globalThis.chrome;
+  const repo = native
+    ? new RezkaSuiteRepository.NativeRepository()
+    : new RezkaSuiteRepository.Repository();
+  await repo.open();
+  let ui = (await repo.get("settings", "ui")) || {
+      id: "ui",
+      tab: "library",
+      offset: 0,
+      filters: {},
+    },
+    settings = (await repo.get("settings", "preferences")) || {
+      id: "preferences",
+      origin: "https://rezkery.com",
+    },
+    selected = null,
+    importer = null,
+    abort = null,
+    loading = false;
+  const editFields = [
+    ["title", "Название"],
+    ["originalTitle", "Оригинальное название"],
+    ["year", "Год"],
+    ["type", "Тип (film / series / cartoon / anime)"],
+    ["countries", "Страны через запятую"],
+    ["genres", "Жанры через запятую"],
+    ["siteRating", "Рейтинг HDRezka"],
+    ["imdb", "IMDb"],
+    ["kp", "Кинопоиск"],
+    ["director", "Режиссёр"],
+    ["cast", "В ролях"],
+    ["description", "Описание"],
+  ];
+  const editBox = document.createElement("details"),
+    editSummary = document.createElement("summary");
+  editSummary.textContent = "Редактировать сведения о фильме";
+  editBox.append(editSummary);
+  for (const [key, label] of editFields) {
+    const l = document.createElement("label");
+    l.textContent = label;
+    const input = document.createElement(
+      key === "description" ? "textarea" : "input",
+    );
+    input.id = "edit_" + key;
+    if (key === "description") input.rows = 6;
+    l.append(input);
+    editBox.append(l);
+  }
+  $("detail").insertBefore(editBox, $("detailStatus").closest("label"));
+  let detailConflicts = [];
+  const conflictChoice = document.createElement("select"),
+    conflictApply = document.createElement("button");
+  conflictApply.textContent = "Использовать выбранный вариант";
+  $("conflicts").after(conflictChoice, conflictApply);
+  conflictApply.onclick = () => {
+    const v = detailConflicts[+conflictChoice.value];
+    if (!v) return;
+    $("detailNote").value = v.note || "";
+    $("detailRating").value = v.rating || 0;
+    $("detailStatus").value = v.status || "";
+    $("detailFavorite").checked = !!v.favorite;
+  };
+  const tell = (s) => {
+    $("message").textContent = s;
+  };
+  const guard =
+    (fn) =>
+    async (...args) => {
+      try {
+        await fn(...args);
+      } catch (e) {
+        tell(e.message || String(e));
+      }
+    };
+  function extCall(area, method, ...args) {
+    const owner = area === "storage" ? api.storage.local : api[area];
+    return new Promise((resolve, reject) => {
+      if (globalThis.browser) {
+        owner[method](...args).then(resolve, reject);
+      } else
+        owner[method](...args, (result) => {
+          const e = api.runtime.lastError;
+          e ? reject(Error(e.message)) : resolve(result);
+        });
+    });
+  }
+  const pending = new Map();
+  globalThis.suiteNativeReply = (id, result) => {
+    const p = pending.get(id);
+    if (p) {
+      pending.delete(id);
+      p.resolve(result);
+    }
+  };
+  function nativeRequest(command) {
+    return new Promise((resolve, reject) => {
+      const id = "n" + Date.now() + Math.random();
+      pending.set(id, { resolve, reject });
+      RezkaNative.request(id, JSON.stringify(command));
+    });
+  }
+  const runner = new RezkaSuiteJobs.Runner(repo, (job, command) =>
+    nativeRequest({ ...command, origin: new URL(job.params.url).origin }),
+  );
+  async function send(command) {
+    if (native) {
+      if (command.action === "enqueue")
+        return runner.enqueue(command.kind, command.params);
+      if (command.action === "resume") return runner.resume(command.id);
+      return;
+    }
+    const r = await extCall("runtime", "sendMessage", {
+      type: "SUITE_COMMAND",
+      ...command,
+    });
+    if (r?.error) throw Error(r.error);
+    return r?.value;
+  }
+  async function saveUI() {
+    await repo.put("settings", ui);
+  }
+  function tab(name) {
+    document.querySelectorAll("main>section").forEach((e) => {
+      e.hidden = e.id !== name;
+    });
+    document
+      .querySelectorAll("nav button")
+      .forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    ui.tab = name;
+    saveUI().catch(tell);
+    if (name === "library") refresh().catch(tell);
+    if (name === "jobs") jobs().catch(tell);
+  }
+  document
+    .querySelectorAll("[data-tab]")
+    .forEach((e) => (e.onclick = () => tab(e.dataset.tab)));
+  $("gear").onclick = () => tab("settings");
+  function theme() {
+    document.body.classList.toggle("light", !!ui.light);
+    $("theme").textContent = ui.light ? "☾" : "☀";
+  }
+  theme();
+  $("theme").onclick = () => {
+    ui.light = !ui.light;
+    theme();
+    saveUI();
+  };
+  const filters = {
+    q: "q",
+    year: "filterYear",
+    type: "filterType",
+    parent: "parent",
+    status: "statusFilter",
+    sort: "sort",
+  };
+  for (const [key, id] of Object.entries(filters)) {
+    $(id).value = ui.filters?.[key] || (key === "sort" ? "addedAt" : "");
+    let timer;
+    $(id).oninput = () => {
+      clearTimeout(timer);
+      timer = setTimeout(
+        guard(async () => {
+          ui.filters = Object.fromEntries(
+            Object.entries(filters).map(([k, e]) => [k, $(e).value]),
+          );
+          ui.offset = 0;
+          await saveUI();
+          await refresh();
+        }),
+        200,
+      );
+    };
+  }
+  async function counts() {
+    const [movies, history, assets] = await Promise.all(
+      ["movies", "history", "assets"].map((s) => repo.count(s)),
+    );
+    $("stats").textContent = `${movies} в библиотеке · ${history} выбрано`;
+    $("storageStats").textContent = `Постеров в кэше: ${assets}`;
+  }
+  async function parents() {
+    const rows = [
+      ...(await repo.all("catalogs")),
+      ...(await repo.all("collections")),
+      ...(await repo.all("tags")),
+    ];
+    for (const id of ["parent", "uploadParent", "detailParent"]) {
+      const value = $(id).value;
+      $(id).replaceChildren(
+        new Option(id === "parent" ? "Все каталоги" : "Выберите…", ""),
+      );
+      for (const p of rows)
+        $(id).add(new Option(p.title || p.name || p.id, p.id));
+      $(id).value = value || ui.filters?.parent || "";
+    }
+    return rows;
+  }
+  function openMovie(m) {
+    let u = new URL(m.url);
+    if (settings.origin)
+      u = new URL(u.pathname + u.search, new URL(settings.origin).origin);
+    if (native) RezkaNative.open(u.href);
+    else
+      extCall("tabs", "create", { url: u.href, active: true }).catch((e) =>
+        tell(e.message),
+      );
+  }
+  async function renderCards(container, movies) {
+    container.replaceChildren();
+    if (!movies.length) {
+      const empty = document.createElement("p");
+      empty.textContent =
+        "Карточек пока нет. Импортируйте файл или добавьте каталог.";
+      container.append(empty);
+    }
+    const assets = await repo.getMany(
+      "assets",
+      movies.map((m) => m.posterAsset || "missing"),
+    );
+    movies.forEach((m, i) => {
+      const node = document.createElement("article");
+      node.className = "movie";
+      if (assets[i]?.data) {
+        const img = document.createElement("img");
+        img.src = assets[i].data;
+        img.loading = "lazy";
+        img.alt = "";
+        node.append(img);
+      }
+      const b = document.createElement("button");
+      b.textContent = m.title;
+      b.onclick = guard(() => detail(m.id));
+      const meta = document.createElement("small");
+      meta.textContent = [
+        m.year,
+        m.type === "series"
+          ? "Сериал"
+          : m.type === "anime"
+            ? "Аниме"
+            : m.type === "cartoon"
+              ? "Мультфильм"
+              : "Фильм",
+        m.status,
+        m.rating ? "★ " + m.rating : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      node.append(b, meta);
+      container.append(node);
+    });
+  }
+  async function refresh() {
+    if (loading) return;
+    loading = true;
+    try {
+      const r = await repo.query({
+        ...ui.filters,
+        offset: ui.offset || 0,
+        limit: 60,
+      });
+      await renderCards($("cards"), r.items);
+      $("prev").disabled = !ui.offset;
+      $("next").disabled = !r.hasMore;
+      $("pageNumber").textContent = String(
+        Math.floor((ui.offset || 0) / 60) + 1,
+      );
+      await counts();
+    } finally {
+      loading = false;
+    }
+  }
+  $("prev").onclick = guard(async () => {
+    ui.offset = Math.max(0, ui.offset - 60);
+    await saveUI();
+    await refresh();
+  });
+  $("next").onclick = guard(async () => {
+    ui.offset = (ui.offset || 0) + 60;
+    await saveUI();
+    await refresh();
+  });
+  async function detail(id) {
+    selected = await repo.get("movies", id);
+    if (!selected) return;
+    const [d, s, a] = await Promise.all([
+      repo.get("details", id),
+      repo.get("userState", id),
+      repo.get("assets", selected.posterAsset || "missing"),
+    ]);
+    $("detailTitle").textContent = selected.title;
+    $("detailMeta").textContent = [
+      selected.year,
+      ...(selected.countries || []),
+      ...(selected.genres || []),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    $("description").textContent = [
+      d?.description,
+      d?.director ? "Режиссёр: " + d.director : "",
+      d?.cast ? "В ролях: " + d.cast : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    $("detailPoster").replaceChildren();
+    if (a?.data) {
+      const img = document.createElement("img");
+      img.src = a.data;
+      $("detailPoster").append(img);
+    }
+    for (const [key] of editFields) {
+      const value = ["description", "director", "cast"].includes(key)
+        ? d?.[key]
+        : selected[key];
+      $("edit_" + key).value = Array.isArray(value)
+        ? value.join(", ")
+        : (value ?? "");
+    }
+    if (
+      s?.status &&
+      !Array.from($("detailStatus").options).some((x) => x.value === s.status)
+    )
+      $("detailStatus").add(new Option(s.status, s.status));
+    $("detailStatus").value = s?.status || "";
+    $("detailRating").value = s?.rating || "";
+    $("detailNote").value = s?.note || "";
+    $("detailFavorite").checked = !!s?.favorite;
+    $("conflicts").textContent = s?.conflicts?.length
+      ? "Сохранены варианты заметок при объединении: " +
+        s.conflicts.map((x) => x.note || "").join(" / ")
+      : "";
+    detailConflicts = s?.conflicts || [];
+    conflictChoice.replaceChildren();
+    detailConflicts.forEach((v, i) =>
+      conflictChoice.add(
+        new Option(
+          (v.note || "(пустая заметка)").slice(0, 80) + " · " + (v.rating || 0),
+          String(i),
+        ),
+      ),
+    );
+    conflictChoice.hidden = conflictApply.hidden = !detailConflicts.length;
+    if (!$("detail").open) $("detail").showModal();
+  }
+  $("closeDetail").onclick = () => {
+    $("detail").close();
+  };
+  $("openMovie").onclick = () => {
+    if (selected) openMovie(selected);
+  };
+  $("saveDetail").onclick = guard(async () => {
+    const state = {
+      id: selected.id,
+      movieId: selected.id,
+      status: $("detailStatus").value,
+      rating: Math.max(0, Math.min(10, Number($("detailRating").value) || 0)),
+      note: $("detailNote").value,
+      favorite: $("detailFavorite").checked,
+      updatedAt: Date.now(),
+    };
+    const values = Object.fromEntries(
+      editFields.map(([key]) => [key, $("edit_" + key).value]),
+    );
+    if (!C.clean(values.title)) throw Error("Укажите название");
+    if (!["film", "series", "cartoon", "anime"].includes(values.type))
+      throw Error("Выберите тип: film, series, cartoon или anime");
+    const existingDetail = (await repo.get("details", selected.id)) || {};
+    const d = {
+      id: selected.id,
+      description: values.description,
+      director: values.director,
+      cast: values.cast,
+      manual: [
+        ...new Set([
+          ...(existingDetail.manual || []),
+          ...["description", "director", "cast"].filter(
+            (k) => (existingDetail[k] || "") !== values[k],
+          ),
+        ]),
+      ],
+    };
+    const raw = {
+      ...selected,
+      ...values,
+      countries: C.list(values.countries),
+      genres: C.list(values.genres),
+      details: d,
+    };
+    const m = C.normalize(raw).movie;
+    m.year = values.year ? C.year(values.year) : null;
+    m.yearKey = m.year || 0;
+    m.manual = [
+      ...new Set([
+        ...(selected.manual || []),
+        ...editFields
+          .map((x) => x[0])
+          .filter(
+            (k) =>
+              !["description", "director", "cast"].includes(k) &&
+              JSON.stringify(m[k]) !== JSON.stringify(selected[k]),
+          ),
+      ]),
+    ];
+    await repo.batch([
+      ["userState", state],
+      ["details", d],
+      [
+        "movies",
+        {
+          ...m,
+          status: state.status,
+          rating: state.rating,
+          updatedAt: Date.now(),
+        },
+      ],
+    ]);
+    $("detail").close();
+    await refresh();
+  });
+  $("addRelation").onclick = guard(async () => {
+    const parentId = $("detailParent").value;
+    if (!parentId) throw Error("Выберите коллекцию или метку");
+    await repo.put("memberships", {
+      id: parentId + "|" + selected.id,
+      parentId,
+      movieId: selected.id,
+    });
+    tell("Связь добавлена");
+  });
+  $("removeRelation").onclick = guard(async () => {
+    const parentId = $("detailParent").value;
+    if (!parentId) throw Error("Выберите папку");
+    await repo.delete("memberships", parentId + "|" + selected.id);
+    $("detail").close();
+    await refresh();
+  });
+  $("deleteMovie").onclick = guard(async () => {
+    if (
+      !confirm(
+        "Удалить «" +
+          selected.title +
+          "» из библиотеки? История рандома сохранится.",
+      )
+    )
+      return;
+    const id = selected.id,
+      batch = ["movies", "details", "userState"].map((s) => [s, { id }, true]);
+    for await (const row of repo.iterate("memberships"))
+      if (row.movieId === id) batch.push(["memberships", { id: row.id }, true]);
+    batch.push([
+      "tombstones",
+      { id: "movies:" + id, store: "movies", targetId: id, at: Date.now() },
+    ]);
+    await repo.batch(batch);
+    $("detail").close();
+    await refresh();
+  });
+  for (const [id, store, prefix] of [
+    ["newCollection", "collections", "collection:"],
+    ["newTag", "tags", "tag:"],
+  ])
+    $(id).onclick = guard(async () => {
+      const name = prompt("Название");
+      if (!name?.trim()) return;
+      await repo.put(store, {
+        id: prefix + Date.now() + "-" + Math.random().toString(36).slice(2),
+        name: name.trim(),
+        updatedAt: Date.now(),
+      });
+      await parents();
+      tell("Создано: " + name);
+    });
+  let randomConfig = (await repo.get("settings", "random")) || {
+    id: "random",
+    mode: "simple",
+    simple: { count: 1 },
+    advanced: { count: 1, year: "", type: "" },
+  };
+  function setRandom() {
+    const v = randomConfig[randomConfig.mode];
+    $("randomMode").value = randomConfig.mode;
+    $("advanced").hidden = randomConfig.mode !== "advanced";
+    $("pickCount").value = v.count;
+    $("randomYear").value = randomConfig.advanced.year;
+    $("randomType").value = randomConfig.advanced.type;
+    $("yearSelect").value = randomConfig.advanced.year || "";
+  }
+  for (let y = Math.max(2035, new Date().getFullYear() + 10); y >= 1900; y--) {
+    $("years").append(new Option(String(y), String(y)));
+    $("yearSelect").add(new Option(String(y), String(y)));
+  }
+  $("yearSelect").insertBefore(
+    new Option("Любой год", ""),
+    $("yearSelect").firstChild,
+  );
+  setRandom();
+  async function saveRandom() {
+    const v = randomConfig[randomConfig.mode];
+    v.count = Math.max(1, Math.min(30, +$("pickCount").value || 1));
+    if (randomConfig.mode === "advanced") {
+      v.year = $("randomYear").value;
+      v.type = $("randomType").value;
+    }
+    await repo.put("settings", randomConfig);
+  }
+  $("randomMode").onchange = guard(async () => {
+    await saveRandom();
+    randomConfig.mode = $("randomMode").value;
+    setRandom();
+    await repo.put("settings", randomConfig);
+  });
+  for (const id of ["pickCount", "randomType", "randomYear"])
+    $(id).onchange = guard(saveRandom);
+  $("yearSelect").onchange = guard(async () => {
+    $("randomYear").value = $("yearSelect").value;
+    await saveRandom();
+  });
+  for (const [id, delta] of [
+    ["yearMinus", -1],
+    ["yearPlus", 1],
+  ])
+    $(id).onclick = guard(async () => {
+      $("randomYear").value = Math.max(
+        1800,
+        Math.min(
+          2199,
+          (+$("randomYear").value || new Date().getFullYear()) + delta,
+        ),
+      );
+      await saveRandom();
+    });
+  // Legacy and Suite share only selected records; catalogue imports never become used URLs.
+  async function publishSelected(movies) {
+    if (native) {
+      RezkaNative.selected(JSON.stringify(movies));
+      return;
+    }
+    const data = await extCall("storage", "get", [
+      "rz_movies_v1",
+      "rz_used_v1",
+    ]);
+    const merged = new Map(
+      (data.rz_movies_v1 || []).map((m) => [C.identity(m), m]),
+    );
+    for (const m of movies) merged.set(m.id, m);
+    const used = new Set(data.rz_used_v1 || []);
+    for (const m of movies) used.add(C.path(m.url));
+    await extCall("storage", "set", {
+      rz_movies_v1: [...merged.values()],
+      rz_used_v1: [...used],
+    });
+  }
+  $("pick").onclick = guard(async () => {
+    await saveRandom();
+    const config = randomConfig[randomConfig.mode],
+      history = new Set(
+        (await repo.all("history")).map((x) => x.movieId || x.id),
+      ),
+      size = config.count,
+      chosen = [],
+      byYear = new Map();
+    let seen = 0;
+    for await (const m of repo.iterate("movies")) {
+      if (
+        history.has(m.id) ||
+        (randomConfig.mode === "advanced" &&
+          ((config.year && m.year !== +config.year) ||
+            (config.type && m.type !== config.type)))
+      )
+        continue;
+      if (randomConfig.mode === "simple" && settings.differentYears) {
+        const key = m.year || "unknown",
+          group = byYear.get(key) || { n: 0 };
+        group.n++;
+        if (Math.random() < 1 / group.n) group.movie = m;
+        byYear.set(key, group);
+      } else {
+        seen++;
+        if (chosen.length < size) chosen.push(m);
+        else {
+          const n = Math.floor(Math.random() * seen);
+          if (n < size) chosen[n] = m;
+        }
+      }
+    }
+    if (byYear.size) {
+      const groups = [...byYear.values()];
+      while (chosen.length < size && groups.length) {
+        const n = Math.floor(Math.random() * groups.length);
+        chosen.push(groups.splice(n, 1)[0].movie);
+      }
+    }
+    if (!chosen.length)
+      throw Error(
+        "Нет подходящих невыбранных карточек. Добавьте каталог или очистите историю в настройках",
+      );
+    await repo.batch(
+      chosen.map((m) => [
+        "history",
+        { id: m.id, movieId: m.id, at: Date.now(), source: "suite-random" },
+      ]),
+    );
+    await publishSelected(chosen);
+    await renderCards($("picked"), chosen);
+    await counts();
+    tell("Выбрано " + chosen.length + ". Нажмите карточку для открытия.");
+  });
+  async function enqueue(kind, params) {
+    const j = await send({ action: "enqueue", kind, params });
+    tell("Задание добавлено");
+    tab("jobs");
+    await jobs();
+    return j;
+  }
+  $("scan").onclick = guard(() =>
+    enqueue("scan", { url: $("scanUrl").value, max: +$("scanMax").value }),
+  );
+  const bookmarks = (direction) =>
+    enqueue("bookmarks", {
+      url: settings.origin,
+      direction,
+      parent: direction === "selected" ? $("uploadParent").value : "",
+    });
+  $("importBookmarks").onclick = guard(() => bookmarks("import"));
+  $("mergeRandom").onclick = $("quickSync").onclick = guard(() =>
+    bookmarks("random"),
+  );
+  $("uploadFolder").onclick = guard(async () => {
+    if (!$("uploadParent").value) throw Error("Выберите локальный каталог");
+    await bookmarks("selected");
+  });
+  $("login").onclick = () => {
+    const u = new URL("/favorites/", settings.origin).href;
+    if (native) RezkaNative.login(u);
+    else
+      extCall("tabs", "create", { url: u, active: true }).catch((e) =>
+        tell(e.message),
+      );
+  };
+  const jobLabels = {
+    queued: "В очереди",
+    running: "Выполняется",
+    completed: "Завершено",
+    failed: "Ошибка",
+    waiting_challenge: "Проверка защиты",
+    paused_auth: "Требуется вход",
+    paused_user: "Приостановлено",
+    waiting_retry: "Ожидание повтора",
+    cancelled: "Отменено",
+    preview: "Ожидает импорта",
+  };
+  async function jobs() {
+    const all = (await repo.all("jobs")).sort((a, b) => b.at - a.at);
+    $("jobList").replaceChildren();
+    for (const j of all) {
+      const box = document.createElement("div");
+      box.className = "job";
+      const p = document.createElement("p");
+      p.textContent = [
+        j.kind,
+        jobLabels[j.status] || j.status,
+        `Страниц/записей: ${j.done || 0}${j.max ? " / " + j.max : ""}`,
+        `Обработано карточек: ${j.imported || j.stats?.movies || 0}`,
+        j.uploaded ? "Выгружено: " + j.uploaded : "",
+        j.error,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      box.append(p);
+      if (
+        j.kind !== "import" &&
+        !["completed", "cancelled"].includes(j.status)
+      ) {
+        const pause = document.createElement("button");
+        pause.textContent =
+          j.status === "running" || j.status === "queued"
+            ? "Пауза"
+            : "Продолжить";
+        pause.onclick = guard(async () => {
+          if (["running", "queued"].includes(j.status))
+            await repo.put("jobs", { ...j, status: "paused_user" });
+          else await send({ action: "resume", id: j.id });
+          await jobs();
+        });
+        const cancel = document.createElement("button");
+        cancel.textContent = "Отменить";
+        cancel.onclick = guard(async () => {
+          await repo.put("jobs", { ...j, status: "cancelled" });
+          await jobs();
+        });
+        box.append(pause, cancel);
+      }
+      if (j.status === "preview") {
+        const b = document.createElement("button");
+        b.textContent = "Вернуться к импорту";
+        b.onclick = guard(async () => {
+          importer = new RezkaSuiteImporter.Importer(repo);
+          importer.session = j.id;
+          importer.stats = j.stats;
+          await previewImport();
+          tab("files");
+        });
+        box.append(b);
+      }
+      $("jobList").append(box);
+    }
+  }
+  function importProgress(s) {
+    $("importProgress").textContent =
+      `Карточек: ${s.movies || 0} · постеров: ${s.assets || 0}${s.applied ? " · записано: " + s.applied : ""}`;
+  }
+  async function previewImport() {
+    let added = 0,
+      duplicates = 0,
+      key = null;
+    while (true) {
+      const rows = await repo.prefix(
+        "staging",
+        importer.session + ":movies:",
+        key,
+        100,
+      );
+      if (!rows.length) break;
+      const existing = await repo.getMany(
+        "movies",
+        rows.map((x) => x.row.id),
+      );
+      for (const m of existing) m ? duplicates++ : added++;
+      key = rows.at(-1).id;
+    }
+    $("previewText").textContent =
+      `Новых карточек: ${added}; уже есть: ${duplicates}; постеров: ${importer.stats.assets}. Личные заметки сохраняются. До подтверждения библиотека не меняется.`;
+    $("preview").hidden = false;
+  }
+  $("importFile").onchange = guard(async () => {
+    const file = $("importFile").files[0];
+    if (!file) return;
+    if (importer) await importer.discard();
+    abort = new AbortController();
+    importer = new RezkaSuiteImporter.Importer(repo, {
+      progress: importProgress,
+      signal: abort.signal,
+    });
+    $("cancelImport").hidden = false;
+    $("preview").hidden = true;
+    try {
+      await importer.file(file);
+      await previewImport();
+    } catch (e) {
+      await importer.discard();
+      importer = null;
+      throw e;
+    } finally {
+      $("cancelImport").hidden = true;
+      $("importFile").value = "";
+    }
+  });
+  $("cancelImport").onclick = () => abort?.abort();
+  $("discardImport").onclick = guard(async () => {
+    await importer.discard();
+    importer = null;
+    $("preview").hidden = true;
+    tell("Импорт отменён");
+  });
+  $("applyImport").onclick = guard(async () => {
+    if (!importer) return;
+    $("applyImport").disabled = true;
+    try {
+      if ($("markImported").checked) {
+        let key = null;
+        while (true) {
+          const rows = await repo.prefix(
+            "staging",
+            importer.session + ":movies:",
+            key,
+            100,
+          );
+          if (!rows.length) break;
+          rows.forEach((x) => importer.movies.add(x.row.id));
+          key = rows.at(-1).id;
+        }
+      }
+      await importer.apply();
+      if ($("markImported").checked) {
+        const rows = [];
+        for (const id of importer.movies)
+          rows.push([
+            "history",
+            { id, movieId: id, at: Date.now(), source: "explicit-import" },
+          ]);
+        await repo.batch(rows);
+      }
+      importer = null;
+      $("preview").hidden = true;
+      await parents();
+      await refresh();
+      tell("Импорт завершён");
+    } finally {
+      $("applyImport").disabled = false;
+    }
+  });
+  async function download(name, type, chunks) {
+    if (native) {
+      RezkaNative.beginExport(name, type);
+      try {
+        for await (const chunk of chunks) {
+          const b =
+            typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk;
+          for (let p = 0; p < b.length; p += 131072) {
+            let s = "";
+            for (const n of b.subarray(p, p + 131072))
+              s += String.fromCharCode(n);
+            RezkaNative.exportChunk(btoa(s));
+          }
+        }
+        RezkaNative.finishExport();
+      } catch (e) {
+        RezkaNative.cancelExport();
+        throw e;
+      }
+      return;
+    }
+    const parts = [];
+    for await (const c of chunks) parts.push(c);
+    const blob = new Blob(parts, { type }),
+      u = URL.createObjectURL(blob),
+      a = document.createElement("a");
+    a.href = u;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+    tell("Копия подготовлена: " + name);
+  }
+  $("exportJson").onclick = guard(() =>
+    download(
+      "rezka-suite.json",
+      "application/json",
+      RezkaSuiteExport.json(repo),
+    ),
+  );
+  $("exportZip").onclick = guard(() =>
+    download("rezka-suite.zip", "application/zip", RezkaSuiteExport.zip(repo)),
+  );
+  $("exportHtml").onclick = guard(() =>
+    download(
+      "rezka-suite-offline.html",
+      "text/html",
+      RezkaSuiteExport.offline(repo),
+    ),
+  );
+  $("exportLegacy").onclick = guard(async () => {
+    async function* old() {
+      yield '{"format":"rezkery-randomizer-db","version":1,"items":[';
+      let first = true;
+      for await (const h of repo.iterate("history")) {
+        const m = await repo.get("movies", h.movieId || h.id);
+        if (m) {
+          yield (first ? "" : ",") + JSON.stringify(m);
+          first = false;
+        }
+      }
+      yield '],"used":[';
+      first = true;
+      for await (const h of repo.iterate("history")) {
+        const m = await repo.get("movies", h.movieId || h.id);
+        if (m) {
+          yield (first ? "" : ",") + JSON.stringify(C.path(m.url));
+          first = false;
+        }
+      }
+      yield "]}";
+    }
+    await download("rezkery-randomizer-db.json", "application/json", old());
+  });
+  $("origin").value = settings.origin;
+  $("differentYears").checked = !!settings.differentYears;
+  $("autoSync").checked = !!settings.autoSync;
+  $("interval").value =
+    (await repo.get("settings", "network"))?.interval || 2000;
+  $("scanUrl").value = settings.origin;
+  $("saveSettings").onclick = guard(async () => {
+    const origin = new URL($("origin").value);
+    if (origin.protocol !== "https:") throw Error("Укажите HTTPS-зеркало");
+    settings = {
+      id: "preferences",
+      origin: origin.origin,
+      differentYears: $("differentYears").checked,
+      autoSync: $("autoSync").checked,
+    };
+    await repo.batch([
+      ["settings", settings],
+      ["settings", { id: "network", interval: +$("interval").value }],
+    ]);
+    tell("Настройки сохранены");
+  });
+  $("enrich").onclick = guard(() =>
+    enqueue("details", { url: settings.origin }),
+  );
+  $("cachePosters").onclick = guard(() =>
+    enqueue("posters", { url: settings.origin }),
+  );
+  async function clearStore(store) {
+    let key = null;
+    while (true) {
+      const rows = await repo.page(store, key, 100);
+      if (!rows.length) break;
+      await repo.batch(rows.map((x) => [store, { id: x.id }, true]));
+      key = rows.at(-1).id;
+    }
+  }
+  $("clearMedia").onclick = guard(async () => {
+    if (
+      !confirm("Удалить сохранённые постеры? Карточки и описания сохранятся.")
+    )
+      return;
+    await clearStore("assets");
+    await refresh();
+  });
+  $("clearHistory").onclick = guard(async () => {
+    if (!confirm("Снова разрешить выбирать все фильмы в Suite?")) return;
+    await clearStore("history");
+    await counts();
+  });
+  const cloud = (await repo.get("settings", "gist")) || {};
+  $("gistToken").value = cloud.token || "";
+  $("gistId").value = cloud.gistId || "";
+  $("gistSync").onclick = guard(async () => {
+    const token = $("gistToken").value.trim();
+    let id = $("gistId").value.trim().replace(/^.*\//, "");
+    if (!token) throw Error("Укажите токен Gist");
+    const headers = {
+        Authorization: "Bearer " + token,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      url = "https://api.github.com/gists";
+    let etag = "";
+    if (id) {
+      if (!/^[a-f0-9]+$/i.test(id)) throw Error("Некорректный Gist ID");
+      const r = await fetch(url + "/" + id, { headers });
+      if (!r.ok) throw Error("Gist: HTTP " + r.status);
+      etag = r.headers.get("ETag") || "";
+      const g = await r.json(),
+        f = g.files?.["rezka-suite.json"];
+      if (f) {
+        if (f.truncated)
+          throw Error(
+            "Gist превышает предел встроенного файла. Перенесите полную копию JSON/ZIP",
+          );
+        const i = new RezkaSuiteImporter.Importer(repo);
+        try {
+          await i.json([f.content]);
+          await i.apply();
+        } catch (e) {
+          await i.discard();
+          throw e;
+        }
+      }
+    }
+    let content = "";
+    for await (const c of RezkaSuiteExport.json(repo)) {
+      content += c;
+      if (content.length > 950000)
+        throw Error(
+          "Метаданные больше 950 КБ. Используйте файл JSON/ZIP вместо Gist",
+        );
+    }
+    if (id && etag) {
+      const check = await fetch(url + "/" + id, { headers });
+      if (!check.ok || check.headers.get("ETag") !== etag)
+        throw Error(
+          "Gist изменился на другом устройстве. Повторите объединение",
+        );
+    }
+    const r = await fetch(id ? url + "/" + id : url, {
+      method: id ? "PATCH" : "POST",
+      headers,
+      body: JSON.stringify({
+        description: "Rezka Suite — метаданные библиотеки",
+        public: false,
+        files: { "rezka-suite.json": { content } },
+      }),
+    });
+    if (!r.ok) throw Error("Gist: HTTP " + r.status);
+    id = (await r.json()).id;
+    $("gistId").value = id;
+    await repo.put("settings", { id: "gist", token, gistId: id });
+    await parents();
+    await refresh();
+    tell("Метаданные объединены через Gist");
+  });
+  async function migrate() {
+    let movies = [];
+    if (native) {
+      movies = JSON.parse(RezkaNative.legacy());
+    } else {
+      const old = await extCall("storage", "get", ["rz_movies_v1"]);
+      movies = old.rz_movies_v1 || [];
+    }
+    const unseen = [];
+    for (let n = 0; n < movies.length; n += 200) {
+      const part = movies.slice(n, n + 200),
+        existing = await repo.getMany(
+          "history",
+          part.map((m) => C.identity(m) || "invalid"),
+        );
+      part.forEach((m, i) => {
+        if (!existing[i]) unseen.push(m);
+      });
+    }
+    if (unseen.length) {
+      movies = unseen;
+      const i = new RezkaSuiteImporter.Importer(repo);
+      await i.json([
+        JSON.stringify({
+          format: "rezkery-randomizer-db",
+          version: 1,
+          items: movies,
+        }),
+      ]);
+      await i.apply();
+    }
+    await repo.put("settings", { id: "legacyMigrated", at: Date.now() });
+  }
+  await migrate();
+  await parents();
+  await counts();
+  tab(ui.tab || "library");
+  let polling = false;
+  setInterval(async () => {
+    if (polling) return;
+    polling = true;
+    try {
+      if (native) await runner.tick();
+      if (ui.tab === "jobs") await jobs();
+      if (native && settings.autoSync) {
+        const last = await repo.get("settings", "autoSyncAt");
+        if (Date.now() - (last?.at || 0) > 1800000) {
+          await repo.put("settings", { id: "autoSyncAt", at: Date.now() });
+          await send({
+            action: "enqueue",
+            kind: "bookmarks",
+            params: {
+              url: settings.origin,
+              direction: "random-import",
+              auto: true,
+            },
+          });
+        }
+      }
+    } catch (e) {
+      tell(e.message);
+    } finally {
+      polling = false;
+    }
+  }, 2000);
+  if (native)
+    $("jobNote").textContent +=
+      " На Android задания выполняются, пока открыт экран Suite; после возврата продолжаются с сохранённого места.";
+})().catch((e) => {
+  document.getElementById("message").textContent =
+    "Не удалось открыть библиотеку: " + (e.message || e);
+});

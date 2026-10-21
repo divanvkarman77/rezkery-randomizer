@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "version": "2.0.0.1",
-  "name": "Rezkery Randomizer — Chrome",
+  "name": "Rezka Suite — Chrome",
   "description": "Рандомайзер каталога и зеркал Rezkery с фоновой работой и базой без повторов.",
   "permissions": [
     "storage",

@@ -18,6 +18,7 @@ jobs:
         with:
           version: 11.25.0
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
