@@ -63,6 +63,8 @@ public class MainActivity extends Activity {
     static final int PICK_IMPORT=101, PICK_EXPORT_JSON=102, PICK_EXPORT_HTML=103;
     JSONArray library = new JSONArray();
     boolean lightTheme;
+    AlertDialog databaseDialog;
+    boolean reopenDatabaseAfterFilm=false;
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b); setContentView(R.layout.activity_main);
@@ -87,7 +89,7 @@ public class MainActivity extends Activity {
         avoidSameYear.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("avoidSameYear",checked).apply());
         autoSyncBookmarks.setChecked(prefs.getBoolean("autoSyncBookmarks",false));
         autoSyncBookmarks.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("autoSyncBookmarks",checked).apply());
-        year.setText(prefs.getString("yearAdvanced","")); count.setText(prefs.getString("countAdvanced",prefs.getString("pickCount","1")));
+        year.setText(prefs.getString("lastYear",prefs.getString("yearAdvanced",""))); count.setText(prefs.getString("countAdvanced",prefs.getString("pickCount","1")));
         lightTheme=prefs.getBoolean("lightTheme",false);
         type.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,types) {{
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -238,7 +240,7 @@ public class MainActivity extends Activity {
         batchYear=simpleMode?"":year.getText().toString().trim();
         batchType=simpleMode?0:type.getSelectedItemPosition();
         if(!batchYear.isEmpty()&&!batchYear.matches("\\d{4}")){setStatus("Укажи год четырьмя цифрами, например 1998.");return;}
-        if(!simpleMode)prefs.edit().putString("domainAdvanced",batchOrigin).putString("yearAdvanced",batchYear).putString("countAdvanced",count.getText().toString().trim()).putInt("categoryAdvanced",batchType).apply();
+        if(!simpleMode)prefs.edit().putString("domainAdvanced",batchOrigin).putString("yearAdvanced",batchYear).putString("lastYear",batchYear).putString("countAdvanced",count.getText().toString().trim()).putInt("categoryAdvanced",batchType).apply();
         try {
             int selected=simpleMode?Integer.parseInt(simpleCount.getText().toString().trim()):Integer.parseInt(count.getText().toString().trim());
             pendingTotal=Math.max(1,Math.min(30,selected));
@@ -310,7 +312,8 @@ public class MainActivity extends Activity {
         ArrayList<JSONObject> candidates=new ArrayList<>(), sameYearCandidates=new ArrayList<>();
         if(cards!=null) for(int i=0;i<cards.length();i++){
             JSONObject x=cards.getJSONObject(i); String u=x.optString("url","");
-            if(!u.isEmpty()&&!used.contains(u)){
+            String key=movieKey(u);
+            if(!u.isEmpty()&&!used.contains(key)){
                 String cardYear=x.optString("year","");
                 if(!batchAvoidSameYear||cardYear.isEmpty()||!batchYears.contains(cardYear))candidates.add(x);
                 else sameYearCandidates.add(x);
@@ -319,7 +322,7 @@ public class MainActivity extends Activity {
         if(!candidates.isEmpty()){
             JSONObject pick=candidates.get(new Random().nextInt(candidates.size()));
             String u=pick.getString("url"), cardYear=pick.optString("year","");
-            pendingBatchUrls.add(u); pendingUrls.add(u);pendingTitles.put(u,pick.optString("title",u));
+            pendingBatchUrls.add(movieKey(u)); pendingUrls.add(u);pendingTitles.put(u,pick.optString("title",u));
             if(!cardYear.isEmpty())batchYears.add(cardYear);
             pendingChosen++;
         }
@@ -336,9 +339,11 @@ public class MainActivity extends Activity {
                 setStatus(batchNotice.isEmpty()?"Не удалось найти новые карточки на проверенных страницах. Попробуй позже.":batchNotice);
                 return;
             }
+            HashSet<String> savedKeys=usedUrls();
             for(String u:pendingUrls){
-                JSONObject record=new JSONObject();record.put("url",u);record.put("title",pendingTitles.containsKey(u)?pendingTitles.get(u):u);
-                record.put("date",System.currentTimeMillis());record.put("domain",batchOrigin);library.put(record);
+                String key=movieKey(u);if(key.isEmpty()||savedKeys.contains(key))continue;
+                JSONObject record=new JSONObject();record.put("id",key);record.put("url",u);record.put("title",pendingTitles.containsKey(u)?pendingTitles.get(u):u);
+                record.put("date",System.currentTimeMillis());record.put("domain",batchOrigin);library.put(record);savedKeys.add(key);
             }
             saveLibrary();
             int mode=prefs.getInt("openMode",0);openBatch(new ArrayList<>(pendingUrls),mode);
@@ -356,8 +361,8 @@ public class MainActivity extends Activity {
     void pickFrom(JSONArray cards){
         try{
             if(cards==null||cards.length()==0){setStatus("На странице не найдены карточки. Если сайт показывает проверку, пройди её в браузере и попробуй снова.");return;}
-            HashSet<String> used=usedUrls(); ArrayList<JSONObject> candidates=new ArrayList<>();
-            for(int i=0;i<cards.length();i++){JSONObject x=cards.getJSONObject(i);if(!used.contains(x.getString("url")))candidates.add(x);}
+            HashSet<String> used=usedUrls(), seen=new HashSet<>(); ArrayList<JSONObject> candidates=new ArrayList<>();
+            for(int i=0;i<cards.length();i++){JSONObject x=cards.getJSONObject(i);String key=movieKey(x.optString("url",""));if(!key.isEmpty()&&!used.contains(key)&&seen.add(key))candidates.add(x);}
             if(candidates.isEmpty()){setStatus("На этой странице все фильмы уже выбраны. Попробуй ещё раз.");return;}
             Collections.shuffle(candidates);
             int wanted=1;
@@ -366,9 +371,10 @@ public class MainActivity extends Activity {
             ArrayList<String> urls=new ArrayList<>();
             for(int i=0;i<n;i++){
                 JSONObject pick=candidates.get(i); String u=pick.getString("url");
-                JSONObject record=new JSONObject();record.put("url",u);record.put("title",pick.optString("title","Без названия"));
+                String key=movieKey(u);if(used.contains(key))continue;
+                JSONObject record=new JSONObject();record.put("id",key);record.put("url",u);record.put("title",pick.optString("title","Без названия"));
                 record.put("date",System.currentTimeMillis());record.put("domain",origin());
-                library.put(record);urls.add(u);
+                library.put(record);used.add(key);urls.add(u);
             }
             saveLibrary();
             int mode=prefs.getInt("openMode",0);
@@ -468,8 +474,10 @@ public class MainActivity extends Activity {
     void openFilm(String original){
         int mode=prefs.getInt("openMode",0);
         if(mode==2){
-            new AlertDialog.Builder(this).setTitle("Где открыть фильм?")
-                .setItems(new String[]{"HDRezka App","Браузер"},(d,which)->openFilmWithMode(original,which==0?1:0)).show();
+            AlertDialog chooser=new AlertDialog.Builder(this).setTitle("Где открыть фильм?")
+                .setItems(new String[]{"HDRezka App","Браузер"},(d,which)->openFilmWithMode(original,which==0?1:0)).create();
+            chooser.setOnCancelListener(d->{reopenDatabaseIfPending();});
+            chooser.show();
         }else openFilmWithMode(original,mode);
     }
     void openFilmWithMode(String original,int mode){
@@ -480,7 +488,7 @@ public class MainActivity extends Activity {
         }catch(Exception e){
             try{Intent fallback=new Intent(Intent.ACTION_VIEW,Uri.parse(original));fallback.addCategory(Intent.CATEGORY_BROWSABLE);startActivity(fallback);
                 if(mode==1)setStatus("HDRezka App не найдена; ссылка открыта в браузере.");
-            }catch(Exception ex){setStatus("Не удалось открыть ссылку: "+ex.getMessage());}
+            }catch(Exception ex){setStatus("Не удалось открыть ссылку: "+ex.getMessage());reopenDatabaseIfPending();}
         }
     }
     void openBatch(ArrayList<String> urls,int mode){
@@ -503,21 +511,66 @@ public class MainActivity extends Activity {
     }
     android.text.TextWatcher simpleWatcher(String key){
         return new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}
-            public void onTextChanged(CharSequence s,int start,int before,int count){if(prefs!=null){prefs.edit().putString(key,s.toString()).apply();if("domainAdvanced".equals(key))prefs.edit().remove("hdrezkaAuthOrigin").apply();}}
+            public void onTextChanged(CharSequence s,int start,int before,int count){if(prefs!=null){android.content.SharedPreferences.Editor edit=prefs.edit().putString(key,s.toString());if("yearAdvanced".equals(key))edit.putString("lastYear",s.toString());if("domainAdvanced".equals(key))edit.remove("hdrezkaAuthOrigin");edit.apply();}}
             public void afterTextChanged(android.text.Editable e){}};
     }
 
+    String movieKey(String value){
+        String raw=value==null?"":value.trim();
+        if(raw.isEmpty())return "";
+        try{
+            Uri uri=Uri.parse(raw);String path=uri.getPath();
+            if(path==null||path.isEmpty())path=raw.split("[?#]",2)[0];
+            path=path.replaceAll("/{2,}","/").replaceAll("/+$","");
+            if(path.isEmpty())return "/";
+            return path.startsWith("/")?path:"/"+path;
+        }catch(Exception e){
+            String path=raw.replaceAll("[?#].*$","").replaceAll("/{2,}","/").replaceAll("/+$","");
+            if(path.isEmpty())return "/";
+            return path.startsWith("/")?path:"/"+path;
+        }
+    }
+    JSONObject mergeMovieRecords(JSONObject existing,JSONObject incoming){
+        try{
+            JSONObject out=new JSONObject(existing.toString());
+            String[] fields={"title","year","poster","type","typeLabel","sourcePage"};
+            for(String field:fields){
+                String old=out.optString(field,""),next=incoming.optString(field,"");
+                boolean missing=old.isEmpty()||"Без названия".equals(old)||("type".equals(field)&&"other".equals(old));
+                if(missing&&!next.isEmpty())out.put(field,next);
+            }
+            out.put("id",movieKey(out.optString("url","")));
+            return out;
+        }catch(Exception e){return existing;}
+    }
     HashSet<String> usedUrls(){
         HashSet<String> out=new HashSet<>();
-        try{for(int i=0;i<library.length();i++)out.add(library.getJSONObject(i).optString("url",""));}catch(Exception ignored){}
+        try{for(int i=0;i<library.length();i++){JSONObject item=library.getJSONObject(i);String key=movieKey(item.optString("url",""));if(!key.isEmpty())out.add(key);}}catch(Exception ignored){}
         String saved=prefs.getString("used","");
-        try{JSONArray old=new JSONArray(saved);for(int i=0;i<old.length();i++)out.add(old.getString(i));}catch(Exception ignored){}
+        try{JSONArray old=new JSONArray(saved);for(int i=0;i<old.length();i++){String key=movieKey(old.getString(i));if(!key.isEmpty())out.add(key);}}catch(Exception ignored){}
         return out;
     }
-    void loadLibrary(){try{library=new JSONArray(prefs.getString("library","[]"));}catch(Exception e){library=new JSONArray();}}
+    void loadLibrary(){
+        try{
+            JSONArray source=new JSONArray(prefs.getString("library","[]"));
+            LinkedHashMap<String,JSONObject> map=new LinkedHashMap<>();boolean changed=false;
+            for(int i=0;i<source.length();i++){
+                JSONObject raw=source.optJSONObject(i);if(raw==null)continue;
+                String url=raw.optString("url",""),key=movieKey(url);if(url.isEmpty()||key.isEmpty()||"/".equals(key))continue;
+                JSONObject item=new JSONObject(raw.toString());item.put("id",key);
+                if(map.containsKey(key)){map.put(key,mergeMovieRecords(map.get(key),item));changed=true;}
+                else map.put(key,item);
+                if(!key.equals(raw.optString("id","")))changed=true;
+            }
+            library=new JSONArray();for(JSONObject item:map.values())library.put(item);
+            if(changed||library.length()!=source.length())saveLibrary();
+        }catch(Exception e){library=new JSONArray();}
+    }
     void saveLibrary(){prefs.edit().putString("library",library.toString()).putString("used",new JSONArray(usedUrls()).toString()).apply();}
     void setStatus(String s){status.setText(s);}
     void showDatabase(){
+        if(databaseDialog!=null&&databaseDialog.isShowing())return;
+        prefs.edit().putString("lastWindow","database").apply();
         ArrayList<JSONObject> entries=new ArrayList<>();
         ArrayList<String> labels=new ArrayList<>();
         for(int i=library.length()-1;i>=0;i--){
@@ -538,7 +591,7 @@ public class MainActivity extends Activity {
             .setAdapter(adapter,(dialog,which)->{
                 if(which<0||which>=entries.size())return;
                 String url=entries.get(which).optString("url","");
-                if(!url.isEmpty())openFilm(url);
+                if(!url.isEmpty()){reopenDatabaseAfterFilm=true;prefs.edit().putString("lastWindow","database").apply();openFilm(url);}
             })
             .setPositiveButton("Случайный из базы",(dialog,which)->openRandomSaved())
             .setNeutralButton("Очистить базу",(dialog,which)->new AlertDialog.Builder(this).setMessage("Удалить всю базу и историю без повторов?")
@@ -549,7 +602,8 @@ public class MainActivity extends Activity {
                     setStatus("База и история очищены.");
                 }).show())
             .setNegativeButton("Закрыть",null);
-        final AlertDialog databaseDialog=builder.create();
+        databaseDialog=builder.create();
+        databaseDialog.setOnDismissListener(dialog->{if(!reopenDatabaseAfterFilm)prefs.edit().putString("lastWindow","main").apply();databaseDialog=null;});
         databaseDialog.setOnShowListener(ignored->databaseDialog.getListView().setOnItemLongClickListener((parent,view,position,id)->{
             if(position<0||position>=entries.size())return true;
             JSONObject item=entries.get(position);
@@ -558,6 +612,7 @@ public class MainActivity extends Activity {
             new AlertDialog.Builder(this).setTitle(title)
                 .setItems(new String[]{"Открыть фильм","Удалить из базы"},(actionDialog,action)->{
                     if(action==0){
+                        reopenDatabaseAfterFilm=true;prefs.edit().putString("lastWindow","database").apply();
                         databaseDialog.dismiss();
                         if(!url.isEmpty())openFilm(url);
                     }else if(action==1){
@@ -571,18 +626,35 @@ public class MainActivity extends Activity {
         }));
         databaseDialog.show();
     }
+    void reopenDatabaseIfPending(){
+        if(!reopenDatabaseAfterFilm)return;
+        new android.os.Handler(getMainLooper()).postDelayed(()->{
+            if(reopenDatabaseAfterFilm&&!isFinishing()&&(databaseDialog==null||!databaseDialog.isShowing())){
+                reopenDatabaseAfterFilm=false;showDatabase();
+            }
+        },250);
+    }
+    @Override protected void onResume(){
+        super.onResume();
+        if(prefs!=null&&"database".equals(prefs.getString("lastWindow","main"))&&(databaseDialog==null||!databaseDialog.isShowing())){
+            reopenDatabaseAfterFilm=false;showDatabase();
+        }
+    }
     void removeMovieFromDatabase(String url){
         JSONArray remaining=new JSONArray();
         boolean removed=false;
+        String target=movieKey(url);
         for(int i=0;i<library.length();i++){
             JSONObject item=library.optJSONObject(i);
             if(item==null)continue;
-            if(url.equals(item.optString("url",""))){removed=true;continue;}
+            if(target.equals(movieKey(item.optString("url","")))){removed=true;continue;}
             remaining.put(item);
         }
         if(!removed){setStatus("Карточка не найдена в базе.");return;}
         HashSet<String> used=new HashSet<>(usedUrls());
-        used.remove(url);
+        boolean stillUsed=false;
+        for(int i=0;i<remaining.length();i++){JSONObject item=remaining.optJSONObject(i);if(item!=null&&target.equals(movieKey(item.optString("url","")))){stillUsed=true;break;}}
+        if(!stillUsed)used.remove(target);
         library=remaining;
         prefs.edit().putString("used",new JSONArray(used).toString()).apply();
         saveLibrary();
@@ -627,7 +699,7 @@ public class MainActivity extends Activity {
                 }
                 if(incoming==null)throw new Exception("Файл не содержит списка items или movies.");
                 mergeLibrary(incoming);
-                if(importedUsed!=null){HashSet<String> used=usedUrls();for(int i=0;i<importedUsed.length();i++){String u=importedUsed.optString(i,"");if(!u.isEmpty())used.add(u);}prefs.edit().putString("used",new JSONArray(used).toString()).apply();}
+                if(importedUsed!=null){HashSet<String> used=usedUrls();for(int i=0;i<importedUsed.length();i++){String u=importedUsed.optString(i,"");if(!u.isEmpty())used.add(movieKey(u));}prefs.edit().putString("used",new JSONArray(used).toString()).apply();}
                 setStatus("Импорт завершён. Всего записей: "+library.length());
             }
         }catch(Exception e){setStatus("Не удалось обработать файл: "+e.getMessage());}
@@ -646,8 +718,17 @@ public class MainActivity extends Activity {
     String readUri(Uri uri)throws Exception{StringBuilder b=new StringBuilder();try(InputStream in=getContentResolver().openInputStream(uri);BufferedReader r=new BufferedReader(new InputStreamReader(in,StandardCharsets.UTF_8))){String line;while((line=r.readLine())!=null)b.append(line).append('\n');}return b.toString();}
     void mergeLibrary(JSONArray incoming)throws Exception{
         LinkedHashMap<String,JSONObject> map=new LinkedHashMap<>();
-        for(int i=0;i<library.length();i++){JSONObject x=library.optJSONObject(i);if(x!=null)map.put(x.optString("url",""),x);}
-        for(int i=0;i<incoming.length();i++){JSONObject x=incoming.optJSONObject(i);if(x!=null&&!x.optString("url","").isEmpty())map.put(x.optString("url"),x);}
+        for(int i=0;i<library.length();i++){
+            JSONObject x=library.optJSONObject(i);if(x==null)continue;
+            String key=movieKey(x.optString("url",""));if(key.isEmpty()||"/".equals(key))continue;
+            x.put("id",key);map.put(key,x);
+        }
+        for(int i=0;i<incoming.length();i++){
+            JSONObject x=incoming.optJSONObject(i);if(x==null)continue;
+            String url=x.optString("url",""),key=movieKey(url);if(url.isEmpty()||key.isEmpty()||"/".equals(key))continue;
+            x.put("id",key);
+            map.put(key,map.containsKey(key)?mergeMovieRecords(map.get(key),x):x);
+        }
         library=new JSONArray();for(JSONObject x:map.values())library.put(x);saveLibrary();
     }
     void githubDialog(){
