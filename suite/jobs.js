@@ -80,7 +80,7 @@
       if (r.error) throw Error(r.error);
       return r;
     }
-    async ingest(cards, parent, history = false) {
+    async ingest(cards, parent, history = false, historySource = "RANDOM") {
       const rows = [],
         normalized = cards
           .map((x) => C.normalize(x, parent?.source))
@@ -92,6 +92,19 @@
       );
       for (let i = 0; i < normalized.length; i++) {
         const n = normalized[i];
+        if (n.poster) {
+          const id = "image:" + (await root.RezkaSuiteImporter.hash(n.poster));
+          n.movie.posterAsset = id;
+          rows.push([
+            "assets",
+            {
+              id,
+              data: n.poster,
+              bytes: Math.round(n.poster.length * 0.75),
+              movieId: n.movie.id,
+            },
+          ]);
+        }
         rows.push(["movies", C.merge(existing[i], n.movie)]);
         if (n.detail.description) rows.push(["details", n.detail]);
         for (const alias of n.movie.aliases)
@@ -111,13 +124,15 @@
             {
               id: n.movie.id,
               movieId: n.movie.id,
-              at: this.now(),
-              source: "RANDOM",
+              at: historySource === "legacy" ? n.movie.addedAt : this.now(),
+              source: historySource,
             },
           ]);
       }
       if (parent) rows.push(["catalogs", parent]);
       await this.repo.batch(rows);
+      if (history && root.RezkaSuitePublishSelected)
+        await root.RezkaSuitePublishSelected(normalized.map((x) => x.movie));
       return normalized.length;
     }
     checkPage(job, r, n, base) {

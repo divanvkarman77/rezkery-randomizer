@@ -84,7 +84,13 @@
       try {
         await fn(...args);
       } catch (e) {
-        tell(e.message || String(e));
+        tell(
+          /QuotaExceeded|SQLITE_FULL|disk is full/i.test(
+            e.name + " " + e.message,
+          )
+            ? "Недостаточно места для базы. Освободите хранилище и продолжите импорт из раздела «Задания»."
+            : e.message || String(e),
+        );
       }
     };
   function extCall(area, method, ...args) {
@@ -562,7 +568,7 @@
   // Legacy and Suite share only selected records; catalogue imports never become used URLs.
   async function publishSelected(movies) {
     if (native) {
-      RezkaNative.selected(JSON.stringify(movies));
+      RezkaNative.selected(JSON.stringify(movies.map(C.legacyItem)));
       return;
     }
     const data = await extCall("storage", "get", [
@@ -572,7 +578,7 @@
     const merged = new Map(
       (data.rz_movies_v1 || []).map((m) => [C.identity(m), m]),
     );
-    for (const m of movies) merged.set(m.id, m);
+    for (const m of movies) merged.set(m.id, C.legacyItem(m));
     const used = new Set(data.rz_used_v1 || []);
     for (const m of movies) used.add(C.path(m.url));
     await extCall("storage", "set", {
@@ -580,6 +586,7 @@
       rz_used_v1: [...used],
     });
   }
+  globalThis.RezkaSuitePublishSelected = publishSelected;
   $("pick").onclick = guard(async () => {
     await saveRandom();
     const config = randomConfig[randomConfig.mode],
@@ -953,6 +960,7 @@
   $("clearHistory").onclick = guard(async () => {
     if (!confirm("Снова разрешить выбирать все фильмы в Suite?")) return;
     await clearStore("history");
+    await repo.put("settings", { id: "legacyResetAt", at: Date.now() });
     await counts();
   });
   const cloud = (await repo.get("settings", "gist")) || {};
@@ -1024,6 +1032,7 @@
     tell("Метаданные объединены через Gist");
   });
   async function migrate() {
+    const reset = (await repo.get("settings", "legacyResetAt"))?.at || 0;
     let movies = [];
     if (native) {
       movies = JSON.parse(RezkaNative.legacy());
@@ -1039,7 +1048,8 @@
           part.map((m) => C.identity(m) || "invalid"),
         );
       part.forEach((m, i) => {
-        if (!existing[i]) unseen.push(m);
+        if (!existing[i] && (!reset || C.stamp(m.addedAt || m.date, 0) > reset))
+          unseen.push(m);
       });
     }
     if (unseen.length) {

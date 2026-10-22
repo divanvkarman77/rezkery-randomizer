@@ -7,6 +7,22 @@ const { Repository } = require("../suite/repository");
 const { Importer, hash } = require("../suite/importer");
 const E = require("../suite/exporter");
 const { Runner } = require("../suite/jobs");
+test("imported HTML keeps poster addresses without active resource attributes", () => {
+  const source = `<html><head><link rel="stylesheet" href="https://example.invalid/a.css"><style>body{background:url(https://example.invalid/b)}</style></head><body><div class="b-content__inline_item" data-id="42"><div class="b-content__inline_item-cover"><a href="/films/42-test.html"><img src="https://example.invalid/poster.jpg" srcset="https://example.invalid/large.jpg 2x" onerror="bad()" style="background:url(https://example.invalid/c)"></a></div><div class="b-content__inline_item-link"><a href="/films/42-test.html">Тест</a><div>1990, фильм</div></div></div><iframe src="https://example.invalid/frame"></iframe><script>bad()</script></body></html>`;
+  const doc = new DOMParser().parseFromString(C.inertHtml(source), "text/html");
+  assert.equal(
+    doc.querySelector(
+      "script,style,link,iframe,[src],[srcset],[onerror],[style]",
+    ),
+    null,
+  );
+  const parsed = C.parseDocument(doc, "https://rezka.fi/");
+  assert.equal(parsed.cards.length, 1);
+  assert.equal(
+    C.normalize(parsed.cards[0], "https://rezka.fi/").movie.posterUrl,
+    "https://example.invalid/poster.jpg",
+  );
+});
 async function populate(r) {
   const image = "data:image/png;base64,AAAA",
     id = "image:" + (await hash(image));
@@ -257,4 +273,41 @@ test("manual corrections preserve their search index and intentional empty year"
   assert.equal(m.title, "Моё название");
   assert.ok(m.search.includes("мое название"));
   assert.ok(!m.search.includes("обновился"));
+});
+test("legacy history bridge publishes selected records, leaving full catalogues separate", async () => {
+  const r = new Repository("bridge-" + Math.random()),
+    previous = globalThis.RezkaSuitePublishSelected,
+    transfers = [];
+  globalThis.RezkaSuitePublishSelected = async (rows) =>
+    transfers.push(...rows);
+  try {
+    const full = new Importer(r);
+    await full.json([
+      JSON.stringify({
+        movies: [
+          { url: "https://rezka.fi/films/3-library.html", title: "Библиотека" },
+        ],
+      }),
+    ]);
+    await full.apply();
+    assert.equal(transfers.length, 0);
+    const old = new Importer(r);
+    await old.json([
+      JSON.stringify({
+        format: "rezkery-randomizer-db",
+        version: 1,
+        items: [
+          { url: "https://rezka.fi/films/4-selected.html", title: "Выбрано" },
+        ],
+      }),
+    ]);
+    await old.apply();
+    assert.equal(transfers.length, 1);
+    assert.equal(C.legacyItem(transfers[0]).title, "Выбрано");
+    assert.equal(C.legacyItem(transfers[0]).search, undefined);
+    assert.equal(await r.count("staging"), 0);
+  } finally {
+    globalThis.RezkaSuitePublishSelected = previous;
+    r.close();
+  }
 });

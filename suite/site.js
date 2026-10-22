@@ -42,7 +42,10 @@
       const html = await response.text();
       if (html.length > 5 * 1024 * 1024)
         throw Error("Слишком большой ответ сайта");
-      const doc = new DOMParser().parseFromString(html, "text/html");
+      const doc = new DOMParser().parseFromString(
+        C.inertHtml(html),
+        "text/html",
+      );
       if (C.challenge(doc)) return { challenge: true };
       if (response.status === 429)
         return {

@@ -107,6 +107,60 @@
       await capture(new URL("/favorites/", origin).href);
     return call("tabs", "sendMessage", tabId, { type: "SUITE_SITE", command });
   });
+  let legacyWrites = Promise.resolve(),
+    legacyReads = Promise.resolve();
+  globalThis.RezkaSuitePublishSelected = (movies) => {
+    legacyWrites = legacyWrites
+      .catch(() => {})
+      .then(async () => {
+        const data = await call("storage", "get", [
+            "rz_movies_v1",
+            "rz_used_v1",
+          ]),
+          old = data.rz_movies_v1 || [],
+          map = new Map(old.map((m) => [C.identity(m), m])),
+          used = new Set(data.rz_used_v1 || []);
+        let changed = map.size !== old.length;
+        for (const m of movies) {
+          if (!map.has(m.id)) {
+            map.set(m.id, C.legacyItem(m));
+            changed = true;
+          }
+          const path = C.path(m.url);
+          if (path && !used.has(path)) {
+            used.add(path);
+            changed = true;
+          }
+        }
+        if (changed)
+          await call("storage", "set", {
+            rz_movies_v1: [...map.values()],
+            rz_used_v1: [...used],
+          });
+      });
+    return legacyWrites;
+  };
+  async function learnLegacy(movies) {
+    const reset = (await repo.get("settings", "legacyResetAt"))?.at || 0;
+    for (let n = 0; n < movies.length; n += 100) {
+      const part = movies.slice(n, n + 100),
+        known = await repo.getMany(
+          "history",
+          part.map((m) => C.identity(m) || "invalid"),
+        ),
+        incoming = part.filter(
+          (m, i) =>
+            !known[i] && (!reset || C.stamp(m.addedAt || m.date, 0) > reset),
+        );
+      if (incoming.length) await runner.ingest(incoming, null, true, "legacy");
+    }
+  }
+  api.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && Array.isArray(changes.rz_movies_v1?.newValue)) {
+      const rows = changes.rz_movies_v1.newValue;
+      legacyReads = legacyReads.catch(() => {}).then(() => learnLegacy(rows));
+    }
+  });
   async function closeTab() {
     if (tabId) {
       try {
@@ -203,6 +257,8 @@
   api.alarms.create("rezka-suite", { periodInMinutes: 1 });
   (async () => {
     await repo.open();
+    const legacy = await call("storage", "get", ["rz_movies_v1"]);
+    await learnLegacy(legacy.rz_movies_v1 || []);
     const owned = await repo.get("settings", "ownedTab");
     if (owned?.tabId) {
       try {

@@ -428,7 +428,7 @@
             }
             if (!depth) {
               const doc = new DOMParser().parseFromString(
-                "<html><body>" + capture + "</body></html>",
+                "<html><body>" + C.inertHtml(capture) + "</body></html>",
                 "text/html",
               );
               let parsed = C.parseDocument(doc, base).cards;
@@ -559,6 +559,8 @@
             let merged = C.merge(old, row);
             if (store === "userState") merged = C.mergeState(old, row);
             batch.push([store, merged]);
+            if (store === "assets")
+              batch.unshift(["staging", { id: records[i].id }, true]);
             if (store === "memberships") {
               const parent = await this.repo.get("catalogs", row.parentId);
               if (
@@ -605,6 +607,17 @@
             applied++;
           }
           await this.repo.batch(batch);
+          if (root.RezkaSuitePublishSelected) {
+            const ids = batch
+              .filter((x) => x[0] === "history" && !x[2])
+              .map((x) => x[1].movieId || x[1].id);
+            if (ids.length) {
+              const movies = (await this.repo.getMany("movies", ids)).filter(
+                Boolean,
+              );
+              if (movies.length) await root.RezkaSuitePublishSelected(movies);
+            }
+          }
           key = records[records.length - 1].id;
           this.progress({ ...this.stats, applied });
         }

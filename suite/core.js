@@ -323,6 +323,38 @@
       ];
     return out;
   }
+  function legacyItem(m) {
+    return {
+      id: path(m.url),
+      url: m.url,
+      title: m.title,
+      year: m.year,
+      type: m.type,
+      poster: m.posterUrl || "",
+      addedAt: m.addedAt,
+    };
+  }
+  function inertHtml(html) {
+    return String(html || "")
+      .replace(
+        /<(script|style|iframe|object|svg|video|audio)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+        "",
+      )
+      .replace(
+        /<\/?(?:link|iframe|object|embed|source|video|audio)\b[^>]*>/gi,
+        "",
+      )
+      .replace(/<img\b[^>]*>/gi, (tag) => {
+        const src = attr(tag, "data-src") || attr(tag, "src");
+        return tag
+          .replace(
+            /\s(?:src|srcset|data-src|data-srcset)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,
+            "",
+          )
+          .replace(/\s*\/?>$/, ' data-suite-src="' + escape(src) + '">');
+      })
+      .replace(/\s(?:style|on[a-z]+)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  }
   async function upgradeIdentity(repo, movie) {
     if (!movie.id.startsWith("rezka:")) return;
     for (const p of movie.aliases || []) {
@@ -498,7 +530,9 @@
           node.querySelector(".entity")?.textContent,
         poster:
           image &&
-          (image.getAttribute("data-src") || image.getAttribute("src")),
+          (image.getAttribute("data-suite-src") ||
+            image.getAttribute("data-src") ||
+            image.getAttribute("src")),
         description: node.querySelector(
           ".descriptionInner,.description,.b-content__bubble_text",
         )?.textContent,
@@ -807,6 +841,8 @@
     normalize,
     merge,
     mergeState,
+    legacyItem,
+    inertHtml,
     upgradeIdentity,
     scope,
     pageUrl,
