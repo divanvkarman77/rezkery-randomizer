@@ -1,3 +1,4 @@
+node_modules/
 .gradle/
 build/
 **/build/
@@ -6,3 +7,9 @@ local.properties
 *.aab
 .DS_Store
 Thumbs.db
+dist/
+extension/*/suite/
+android/.gradle/
+android/**/build/
+local-fixtures/
+*.log

@@ -1,20 +1,26 @@
 {
   "manifest_version": 3,
-  "version": "1.1.0",
-  "name": "Rezkery Randomizer — Firefox",
+  "version": "2.0.0.1",
+  "name": "Rezka Suite — Firefox",
   "description": "Рандомайзер каталога и зеркал Rezkery с фоновой работой и базой без повторов.",
   "permissions": [
     "storage",
     "tabs",
     "scripting",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
   "background": {
     "scripts": [
-      "background.js"
+      "background.js",
+      "suite/core.js",
+      "suite/repository.js",
+      "suite/importer.js",
+      "suite/jobs.js",
+      "suite/extension-worker.js"
     ]
   },
   "action": {
@@ -30,5 +36,12 @@
     "16": "icons/16.png",
     "48": "icons/48.png",
     "128": "icons/128.png"
+  },
+  "version_name": "2.0.0-alpha.1",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "rezka-suite@rezkery.local",
+      "strict_min_version": "115.0"
+    }
   }
 }

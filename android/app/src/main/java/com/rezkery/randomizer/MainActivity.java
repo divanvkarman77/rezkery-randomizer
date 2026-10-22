@@ -128,6 +128,9 @@ public class MainActivity extends Activity {
         githubButton.setOnClickListener(v->githubDialog());
         hdrezkaSyncButton.setOnClickListener(v->hdrezkaSyncDialog());
         settingsButton.setOnClickListener(v->openSettingsWindow());
+        Button suiteButton=new Button(this);suiteButton.setText("📚 Общая библиотека Suite");
+        suiteButton.setOnClickListener(v->{if(randomInProgress){Toast.makeText(this,"Дождитесь завершения подбора",Toast.LENGTH_SHORT).show();return;}startActivity(new Intent(this,SuiteActivity.class));});
+        ((LinearLayout)findViewById(R.id.root)).addView(suiteButton,2);
         applyModeVisibility();
         setStatus("База сохранена локально. Повторно выбранные фильмы пропускаются.");
         maybeAutoSyncBookmarks();
@@ -650,6 +653,7 @@ public class MainActivity extends Activity {
     }
     @Override protected void onResume(){
         super.onResume();
+        if(prefs!=null&&!randomInProgress)loadLibrary();
         if(prefs!=null&&"database".equals(prefs.getString("lastWindow","main"))&&(databaseDialog==null||!databaseDialog.isShowing())){
             showDatabase();
         }

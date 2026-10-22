@@ -1,0 +1,223 @@
+const fs = require("node:fs"),
+  path = require("node:path"),
+  http = require("node:http"),
+  assert = require("node:assert/strict"),
+  os = require("node:os");
+const { chromium } = require("playwright");
+(async () => {
+  let browser, context, server, profile;
+  const errors = [];
+  try {
+    const options = { headless: true };
+    if (process.env.SUITE_BROWSER)
+      options.executablePath = process.env.SUITE_BROWSER;
+    let url;
+    if (process.env.SUITE_EXTENSION) {
+      const dir = path.resolve("extension/chrome-modern");
+      profile = fs.mkdtempSync(path.join(os.tmpdir(), "rezka-suite-test-"));
+      context = await chromium.launchPersistentContext(profile, {
+        ...options,
+        channel: process.env.SUITE_BROWSER ? undefined : "chromium",
+        args: ["--disable-extensions-except=" + dir, "--load-extension=" + dir],
+      });
+      let worker =
+        context.serviceWorkers()[0] ||
+        (await context.waitForEvent("serviceworker"));
+      url = worker.url().replace(/\/[^/]+$/, "/suite/index.html");
+    } else {
+      server = http.createServer((req, res) => {
+        const name = decodeURIComponent(req.url.split("?")[0]).replace(
+          /^\//,
+          "",
+        );
+        if (name.includes("..")) {
+          res.writeHead(403);
+          return res.end();
+        }
+        const f = path.join(__dirname, "../suite", name || "index.html");
+        res.setHeader(
+          "Content-Type",
+          name.endsWith(".js")
+            ? "application/javascript"
+            : name.endsWith(".css")
+              ? "text/css"
+              : "text/html",
+        );
+        fs.createReadStream(f)
+          .on("error", () => {
+            res.statusCode = 404;
+            res.end();
+          })
+          .pipe(res);
+      });
+      await new Promise((r) => server.listen(0, "127.0.0.1", r));
+      url = "http://127.0.0.1:" + server.address().port + "/index.html";
+      browser = await chromium.launch(options);
+      context = await browser.newContext({
+        viewport: { width: 1200, height: 850 },
+        acceptDownloads: true,
+      });
+      await context.addInitScript(() => {
+        globalThis.chrome = {
+          runtime: {
+            lastError: null,
+            sendMessage: (m, cb) => cb({ value: { id: "mock" } }),
+          },
+          storage: {
+            local: { get: (keys, cb) => cb({}), set: (data, cb) => cb() },
+          },
+          tabs: { create: (options, cb) => cb(options) },
+        };
+      });
+    }
+    const page = await context.newPage();
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto(url);
+    await page
+      .locator("#stats")
+      .filter({ hasText: "0 в библиотеке" })
+      .waitFor();
+    await page.locator('[data-tab="files"]').click();
+    const movies = [
+      {
+        url: "https://rezka.fi/films/101-example-1984.html",
+        title: "Проверка 1984",
+        year: 1984,
+        posterData:
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9KYAAAAASUVORK5CYII=",
+      },
+      {
+        url: "https://rezkery.com/films/102-example-1990.html",
+        title: "Проверка 1990",
+        year: 1990,
+      },
+    ];
+    await page.locator("#importFile").setInputFiles({
+      name: "fixture.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify({
+          format: "rezka-suite",
+          schemaVersion: 1,
+          movies,
+          details: [{ id: "rezka:101", description: "Сохранённое описание" }],
+        }),
+      ),
+    });
+    await page.locator("#preview:not([hidden])").waitFor();
+    assert.match(
+      await page.locator("#previewText").textContent(),
+      /Новых карточек: 2/,
+    );
+    await page.locator("#applyImport").click();
+    await page
+      .locator("#stats")
+      .filter({ hasText: "2 в библиотеке" })
+      .waitFor();
+    await page.locator('[data-tab="library"]').click();
+    assert.equal(await page.locator("#cards .movie").count(), 2);
+    await page
+      .getByRole("button", { name: "Проверка 1984", exact: true })
+      .click();
+    await page.locator("#detailNote").fill("Заметка для переноса");
+    await page.locator("#detailRating").fill("8");
+    await page.locator("#saveDetail").click();
+    await page
+      .getByRole("button", { name: "Проверка 1984", exact: true })
+      .click();
+    assert.equal(
+      await page.locator("#detailNote").inputValue(),
+      "Заметка для переноса",
+    );
+    assert.match(
+      await page.locator("#description").textContent(),
+      /Сохранённое описание/,
+    );
+    await page.locator("#closeDetail").click();
+    await page.locator('[data-tab="random"]').click();
+    await page.locator("#randomMode").selectOption("advanced");
+    await page.locator("#randomYear").fill("1984");
+    await page.locator("#randomYear").dispatchEvent("change");
+    await page.locator("#randomMode").selectOption("simple");
+    await page.locator("#pickCount").fill("2");
+    await page.locator("#pick").click();
+    await page.locator("#picked .movie").nth(1).waitFor();
+    assert.equal(await page.locator("#picked .movie").count(), 2);
+    await page.locator('[data-tab="files"]').click();
+    const download = page.waitForEvent("download");
+    await page.locator("#exportZip").click();
+    const file = await download;
+    assert.equal(file.suggestedFilename(), "rezka-suite.zip");
+    const htmlDownload = page.waitForEvent("download");
+    await page.locator("#exportHtml").click();
+    const htmlFile = await htmlDownload;
+    fs.mkdirSync("dist", { recursive: true });
+    const htmlPath = path.resolve("dist/fixture-offline.html");
+    await htmlFile.saveAs(htmlPath);
+    const offline = await context.newPage();
+    offline.on("pageerror", (e) => errors.push(e.message));
+    const remote = [];
+    await offline.route(/^https?:/, (route) => {
+      remote.push(route.request().url());
+      route.abort();
+    });
+    await offline.goto(require("node:url").pathToFileURL(htmlPath).href);
+    await offline.locator("main article").nth(1).waitFor();
+    await offline
+      .getByRole("button", { name: "Проверка 1984", exact: true })
+      .click();
+    await offline.locator("#largePoster").click();
+    await offline.locator("#posterZoom[open]").waitFor();
+    await offline.locator("#zoomClose").click();
+    await offline.locator("#close").click();
+    await offline.locator("#view").selectOption("list");
+    await offline.locator("#year").fill("1984");
+    assert.equal(await offline.locator("main article").count(), 1);
+    assert.deepEqual(remote, []);
+    await offline.close();
+    await page.reload();
+    await page.locator("#files:not([hidden])").waitFor();
+    await page.locator('[data-tab="random"]').click();
+    await page.locator("#randomMode").selectOption("advanced");
+    assert.equal(await page.locator("#randomYear").inputValue(), "1984");
+    await page.locator("#gear").click();
+    await page.locator("#theme").click();
+    fs.mkdirSync("dist/screenshots", { recursive: true });
+    await page.screenshot({
+      path: "dist/screenshots/suite-desktop.png",
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 400, height: 850 });
+    await page.locator('[data-tab="library"]').click();
+    await page.screenshot({
+      path: "dist/screenshots/suite-mobile.png",
+      fullPage: true,
+    });
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+      false,
+    );
+    assert.deepEqual(errors, []);
+    console.log(
+      "UI smoke passed: import, detail state, simple/advanced separation, ZIP export, reopen, responsive layout" +
+        (process.env.SUITE_EXTENSION
+          ? " — real extension"
+          : " — mocked platform adapter"),
+    );
+  } finally {
+    if (context) await context.close();
+    if (browser) await browser.close();
+    if (server) await new Promise((r) => server.close(r));
+    if (
+      profile &&
+      path.dirname(profile) === os.tmpdir() &&
+      path.basename(profile).startsWith("rezka-suite-test-")
+    )
+      fs.rmSync(profile, { recursive: true, force: true });
+  }
+})().catch((e) => {
+  console.error(e);
+  process.exitCode = 1;
+});

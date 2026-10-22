@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://api.github.com; object-src 'none'; frame-src 'none'; base-uri 'none'"
+    />
+    <title>Rezka Suite — библиотека</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <strong>Rezka Suite</strong><small id="stats">Общая библиотека</small>
+      </div>
+      <div>
+        <button id="quickSync" title="Объединить RANDOM">↻</button
+        ><button id="theme" aria-label="Сменить тему">☀</button
+        ><button id="gear" aria-label="Настройки">⚙</button>
+      </div>
+    </header>
+    <nav>
+      <button data-tab="library">Библиотека</button
+      ><button data-tab="random">Рандом</button
+      ><button data-tab="catalogs">Каталоги и закладки</button
+      ><button data-tab="jobs">Задания</button
+      ><button data-tab="files">Файлы</button>
+    </nav>
+    <p id="message" role="status" aria-live="polite"></p>
+    <main>
+      <section id="library">
+        <div class="filters">
+          <input
+            id="q"
+            type="search"
+            placeholder="Название, страна, жанр"
+          /><input
+            id="filterYear"
+            type="number"
+            placeholder="Любой год"
+          /><select id="filterType">
+            <option value="">Все типы</option>
+            <option value="film">Фильмы</option>
+            <option value="series">Сериалы</option>
+            <option value="cartoon">Мультфильмы</option>
+            <option value="anime">Аниме</option></select
+          ><select id="parent">
+            <option value="">Все каталоги</option></select
+          ><select id="statusFilter">
+            <option value="">Любой статус</option>
+            <option>Планирую</option>
+            <option>Смотрю</option>
+            <option>Просмотрено</option>
+            <option>Отложено</option></select
+          ><select id="sort">
+            <option value="addedAt">Сначала добавленные недавно</option>
+            <option value="title">По названию</option>
+            <option value="year">По году</option>
+            <option value="siteRating">Рейтинг сайта</option>
+            <option value="rating">Моя оценка</option>
+          </select>
+        </div>
+        <div id="cards" class="cards"></div>
+        <div class="pager">
+          <button id="prev">← Назад</button><span id="pageNumber"></span
+          ><button id="next">Далее →</button>
+        </div>
+      </section>
+      <section id="random" hidden>
+        <h1>Выбор из моей библиотеки</h1>
+        <p>
+          Библиотека и история выбора хранятся отдельно. Импорт полного каталога
+          оставляет фильмы доступными для рандома.
+        </p>
+        <label
+          >Режим<select id="randomMode">
+            <option value="simple">Простой</option>
+            <option value="advanced">Расширенный</option>
+          </select></label
+        >
+        <div id="advanced" hidden>
+          <label
+            >Тип<select id="randomType">
+              <option value="">Все типы</option>
+              <option value="film">Фильмы</option>
+              <option value="series">Сериалы</option>
+              <option value="cartoon">Мультфильмы</option>
+              <option value="anime">Аниме</option>
+            </select></label
+          ><label
+            >Год (пусто — любой)
+            <div class="row">
+              <button id="yearMinus">−</button
+              ><input
+                id="randomYear"
+                type="number"
+                list="years"
+                min="1800"
+                max="2199"
+                placeholder="Любой год"
+              /><datalist id="years"></datalist><button id="yearPlus">+</button
+              ><select id="yearSelect" aria-label="Выбрать год"></select></div
+          ></label>
+        </div>
+        <label
+          >Карточек<input
+            id="pickCount"
+            type="number"
+            value="1"
+            min="1"
+            max="30" /></label
+        ><button id="pick" class="primary">
+          🎲 Выбрать случайную карточку
+        </button>
+        <div id="picked"></div>
+      </section>
+      <section id="catalogs" hidden>
+        <h1>Каталоги и закладки HDRezka</h1>
+        <label
+          >Адрес раздела, года или персоны<input
+            id="scanUrl"
+            type="url"
+            placeholder="https://rezka.fi/year/1990/" /></label
+        ><label
+          >Число страниц (0 — определить по сайту)<input
+            id="scanMax"
+            type="number"
+            value="0"
+            min="0"
+            max="100000" /></label
+        ><button id="scan">Добавить каталог</button>
+        <hr />
+        <p>
+          Для закладок используется сеанс выбранного зеркала. Импорт всех папок
+          не выгружает в RANDOM всю библиотеку.
+        </p>
+        <div class="row">
+          <button id="login">Открыть HDRezka / войти</button
+          ><button id="importBookmarks">Импортировать все папки</button
+          ><button id="mergeRandom">Объединить RANDOM и историю выбора</button>
+        </div>
+        <label
+          >Локальный каталог для выгрузки в RANDOM<select
+            id="uploadParent"
+          ></select></label
+        ><button id="uploadFolder">
+          Объединить выбранный каталог с RANDOM
+        </button>
+        <div class="row">
+          <button id="newCollection">Новая коллекция</button
+          ><button id="newTag">Новая метка</button>
+        </div>
+      </section>
+      <section id="jobs" hidden>
+        <h1>Задания</h1>
+        <p id="jobNote">
+          Прогресс сохраняется после каждой страницы. При проверке защиты
+          запросы останавливаются до нажатия «Продолжить».
+        </p>
+        <div id="jobList"></div>
+      </section>
+      <section id="files" hidden>
+        <h1>Перенос библиотеки</h1>
+        <label class="file"
+          >Импорт JSON, HTML, MHTML или пакета Suite ZIP<input
+            id="importFile"
+            type="file"
+            accept=".json,.html,.htm,.mhtml,.mht,.zip" /></label
+        ><button id="cancelImport" hidden>Отменить чтение</button>
+        <div id="importProgress" role="status"></div>
+        <div id="preview" hidden>
+          <p id="previewText"></p>
+          <label
+            ><input id="markImported" type="checkbox" />Считать все
+            импортированные фильмы уже выбранными</label
+          ><button id="applyImport" class="primary">
+            Добавить в библиотеку</button
+          ><button id="discardImport">Отменить импорт</button>
+        </div>
+        <hr />
+        <div class="row">
+          <button id="exportJson">JSON: метаданные</button
+          ><button id="exportZip">ZIP: полная копия с постерами</button
+          ><button id="exportHtml">Автономный HTML</button
+          ><button id="exportLegacy">Для старого Randomizer</button>
+        </div>
+        <p>
+          JSON и ZIP совместимы с Android и всеми четырьмя расширениями Suite.
+          Сеансы входа и токены в копию не включаются.
+        </p>
+        <hr />
+        <h2>GitHub Gist</h2>
+        <label
+          >Токен с доступом к Gist<input
+            id="gistToken"
+            type="password"
+            autocomplete="off" /></label
+        ><label>Gist ID<input id="gistId" /></label
+        ><button id="gistSync">Объединить метаданные через Gist</button>
+        <p>
+          Постеры переносятся полной копией ZIP. Для Drive сохраните копию в
+          облачную папку через выбор файла.
+        </p>
+      </section>
+      <section id="settings" hidden>
+        <h1>Настройки</h1>
+        <label
+          >Зеркало HDRezka<input
+            id="origin"
+            type="url"
+            value="https://rezkery.com" /></label
+        ><label
+          >Пауза между запросами<select id="interval">
+            <option value="1000">1 секунда</option>
+            <option value="2000" selected>2 секунды</option>
+            <option value="3000">3 секунды</option>
+            <option value="5000">5 секунд</option>
+            <option value="10000">10 секунд</option>
+          </select></label
+        ><label
+          ><input id="differentYears" type="checkbox" />В простом режиме
+          выбирать карточки разных годов</label
+        ><label
+          ><input id="autoSync" type="checkbox" />Автоматически импортировать
+          RANDOM (не чаще раза в 30 минут)</label
+        ><button id="saveSettings" class="primary">Сохранить</button>
+        <hr />
+        <button id="enrich">Получить описания всей библиотеки</button
+        ><button id="cachePosters">Сохранить недостающие постеры</button
+        ><button id="clearMedia">Очистить только кэш постеров</button
+        ><button id="clearHistory">Очистить историю рандома</button>
+        <p id="storageStats"></p>
+      </section>
+    </main>
+    <dialog id="detail">
+      <button id="closeDetail" class="close">×</button>
+      <h2 id="detailTitle"></h2>
+      <div id="detailPoster"></div>
+      <p id="detailMeta"></p>
+      <p id="description"></p>
+      <label
+        >Статус<select id="detailStatus">
+          <option value="">Не задан</option>
+          <option>Планирую</option>
+          <option>Смотрю</option>
+          <option>Просмотрено</option>
+          <option>Отложено</option>
+        </select></label
+      ><label
+        >Моя оценка (0–10)<input
+          id="detailRating"
+          type="number"
+          min="0"
+          max="10"
+          step="0.1" /></label
+      ><label><input id="detailFavorite" type="checkbox" />Избранное</label
+      ><label>Заметка<textarea id="detailNote" rows="4"></textarea></label>
+      <p id="conflicts"></p>
+      <label>Коллекция или метка<select id="detailParent"></select></label>
+      <div class="row">
+        <button id="saveDetail" class="primary">Сохранить</button
+        ><button id="addRelation">Добавить связь</button
+        ><button id="removeRelation">Убрать из выбранной папки</button
+        ><button id="openMovie">Открыть фильм</button
+        ><button id="deleteMovie" class="danger">Удалить из библиотеки</button>
+      </div>
+    </dialog>
+    <script src="core.js"></script>
+    <script src="repository.js"></script>
+    <script src="offline-viewer.js"></script>
+    <script src="exporter.js"></script>
+    <script src="importer.js"></script>
+    <script src="jobs.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

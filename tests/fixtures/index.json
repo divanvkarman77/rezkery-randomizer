@@ -1,0 +1,44 @@
+[
+  {
+    "file": "old-main-2000.html",
+    "url": "https://rezkery.com/page/2000/",
+    "max": 2523,
+    "cards": 36
+  },
+  {
+    "file": "main-1000.html",
+    "url": "https://rezkery.com/page/1000/",
+    "max": 2541,
+    "cards": 36
+  },
+  {
+    "file": "main-2000.html",
+    "url": "https://rezkery.com/page/2000/",
+    "max": 2541,
+    "cards": 36
+  },
+  {
+    "file": "year-1990-10.html",
+    "url": "https://rezkery.com/films/best/foreign/1990/page/10/",
+    "max": 13,
+    "cards": 36
+  },
+  {
+    "file": "year-1990-7.html",
+    "url": "https://rezkery.com/films/best/foreign/1990/page/7/",
+    "max": 13,
+    "cards": 36
+  },
+  {
+    "file": "year-1990-first.html",
+    "url": "https://rezkery.com/films/best/foreign/1990/",
+    "max": 13,
+    "cards": 36
+  },
+  {
+    "file": "favorites-page2.html",
+    "url": "https://rezkery.com/favorites/7777/page/2/",
+    "max": 2,
+    "cards": 36
+  }
+]

@@ -19,7 +19,7 @@ jobs:
       - id: filter
         shell: bash
         run: |
-          if git diff-tree --root --no-commit-id --name-only -r HEAD | grep -q '^android/'; then
+          if git diff-tree --root --no-commit-id --name-only -r HEAD | grep -Eq '^(android/|suite/)'; then
             echo "android=true" >> "$GITHUB_OUTPUT"
           else
             echo "android=false" >> "$GITHUB_OUTPUT"

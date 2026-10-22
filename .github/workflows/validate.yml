@@ -13,7 +13,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:ui
+      - run: SUITE_EXTENSION=1 pnpm test:ui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: suite-ui-screenshots
+          path: dist/screenshots/*.png
       - name: Validate manifests
         run: |
           node - <<'NODE'
